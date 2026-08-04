@@ -1,0 +1,35 @@
+[project]
+name = "agent-service"
+version = "0.1.0"
+description = "FastAPI agent service: user-scoped encrypted chat backend"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "pydantic>=2",
+    "uvicorn>=0.30",
+    "cryptography>=42",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "ruff>=0.8",
+    "mypy>=1.10",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+
+[tool.mypy]
+python_version = "3.11"
+packages = ["app"]

@@ -1,0 +1,27 @@
+# Python (agent-service, sandbox)
+__pycache__/
+*.py[cod]
+.venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+
+# Env / secrets (opt-in .env.example)
+.env
+.env.*
+
+# Test artifacts
+coverage/
+htmlcov/
+web/playwright-report/
+web/test-results/
+
+# Next.js (also covered by web/.gitignore)
+web/.next/
+
+# Superpowers runtime state
+.superpowers/
+
+# OS
+.DS_Store

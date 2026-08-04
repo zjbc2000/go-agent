@@ -1,0 +1,142 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="1024" viewBox="0 0 1440 1024" role="img" aria-labelledby="title desc">
+  <title id="title">兴趣陪伴与规划助手聊天页，1440 像素桌面设计稿</title>
+  <desc id="desc">三栏工作台，包含会话导航、流式聊天、兴趣规划待确认卡片和会话上下文。</desc>
+  <defs>
+    <filter id="shadow" x="-15%" y="-15%" width="130%" height="140%"><feDropShadow dx="0" dy="6" stdDeviation="14" flood-color="#17201D" flood-opacity=".08"/></filter>
+    <style>
+      .ui { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #17201D; }
+      .meta { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #62706A; font-size: 13px; }
+      .small { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #62706A; font-size: 12px; }
+      .label { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #0B5D57; font-size: 12px; font-weight: 700; }
+      .title { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #17201D; font-size: 18px; font-weight: 700; }
+      .body { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #28332E; font-size: 15px; }
+      .nav { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #38453F; font-size: 14px; }
+      .button { font-family: Inter, PingFang SC, Microsoft YaHei, sans-serif; fill: #FFFFFF; font-size: 14px; font-weight: 700; }
+    </style>
+  </defs>
+  <rect width="1440" height="1024" fill="#F5F7F6"/>
+
+  <!-- left navigation -->
+  <rect x="0" y="0" width="280" height="1024" fill="#FFFFFF"/>
+  <line x1="280" y1="0" x2="280" y2="1024" stroke="#D9E2DE"/>
+  <rect x="28" y="30" width="32" height="32" rx="8" fill="#0F766E"/>
+  <path d="M37 47c6-10 13-7 14-7-1 8-6 15-14 15-3 0-5-1-6-3 2-1 4-3 6-5Z" fill="#D8EEE9"/>
+  <text x="72" y="50" class="title">兴趣助手</text>
+  <text x="72" y="69" class="small">陪伴与规划</text>
+
+  <rect x="20" y="98" width="240" height="44" rx="8" fill="#0F766E"/>
+  <path d="M40 120h16M48 112v16" stroke="#FFFFFF" stroke-width="1.8" stroke-linecap="round"/>
+  <text x="72" y="125" class="button">新建对话</text>
+  <rect x="20" y="154" width="240" height="40" rx="7" fill="#F5F7F6"/>
+  <circle cx="42" cy="174" r="6" fill="none" stroke="#62706A" stroke-width="1.5"/>
+  <path d="m46.5 178.5 4 4" stroke="#62706A" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="62" y="179" class="meta">搜索会话</text>
+
+  <text x="28" y="236" class="small" style="font-weight:700; letter-spacing:.4px;">今天</text>
+  <rect x="12" y="250" width="256" height="58" rx="8" fill="#E8F3F0"/>
+  <rect x="20" y="264" width="3" height="30" rx="1.5" fill="#0F766E"/>
+  <text x="36" y="276" class="nav" style="font-weight:700;">重新找回生活节奏</text>
+  <text x="36" y="295" class="small">刚刚 · 5 条消息</text>
+  <text x="28" y="340" class="nav">周末徒步准备</text>
+  <text x="28" y="359" class="small">昨天 · 12 条消息</text>
+  <text x="28" y="404" class="nav">吉他练习的开始</text>
+  <text x="28" y="423" class="small">7 月 30 日 · 8 条消息</text>
+  <text x="28" y="466" class="nav">最近总有些疲惫</text>
+  <text x="28" y="485" class="small">7 月 29 日 · 16 条消息</text>
+
+  <line x1="20" y1="918" x2="260" y2="918" stroke="#E7ECE9"/>
+  <circle cx="44" cy="955" r="16" fill="#D8EEE9"/>
+  <text x="39" y="960" class="label" style="font-size:13px;">林</text>
+  <text x="72" y="952" class="nav" style="font-weight:700;">林然</text>
+  <text x="72" y="971" class="small">个人账户</text>
+  <circle cx="242" cy="955" r="2" fill="#62706A"/><circle cx="250" cy="955" r="2" fill="#62706A"/><circle cx="258" cy="955" r="2" fill="#62706A"/>
+
+  <!-- middle workspace -->
+  <rect x="280" y="0" width="820" height="1024" fill="#FDFEFD"/>
+  <line x1="280" y1="84" x2="1100" y2="84" stroke="#D9E2DE"/>
+  <text x="332" y="39" class="small">会话</text>
+  <text x="332" y="64" class="title">重新找回生活节奏</text>
+  <circle cx="542" cy="58" r="4" fill="#0F766E"/>
+  <text x="552" y="63" class="small">已保存</text>
+  <rect x="1026" y="30" width="44" height="32" rx="6" fill="#FFFFFF" stroke="#D9E2DE"/>
+  <circle cx="1042" cy="46" r="2" fill="#62706A"/><circle cx="1048" cy="46" r="2" fill="#62706A"/><circle cx="1054" cy="46" r="2" fill="#62706A"/>
+
+  <g transform="translate(360 122)">
+    <circle cx="18" cy="18" r="18" fill="#D8EEE9"/>
+    <path d="M11 23c5-10 13-9 15-10-1 9-5 14-13 14-2 0-3-1-4-2 1-1 1-1 2-2Z" fill="#0F766E"/>
+    <text x="52" y="15" class="nav" style="font-weight:700;">兴趣助手</text>
+    <text x="52" y="35" class="small">10:24</text>
+    <text x="52" y="65" class="body">听起来你最近并不是没有想做的事，而是很难找到</text>
+    <text x="52" y="89" class="body">一件足够轻、可以重新开始的事。摄影似乎让你有一点好奇。</text>
+  </g>
+
+  <g transform="translate(640 258)">
+    <rect width="350" height="82" rx="12" fill="#EEF3F1"/>
+    <text x="22" y="31" class="body">我想试试用手机拍照，但不想一开始</text>
+    <text x="22" y="55" class="body">就买设备或定很难的计划。</text>
+    <text x="22" y="72" class="small">你 · 10:25</text>
+  </g>
+
+  <g transform="translate(360 378)">
+    <circle cx="18" cy="18" r="18" fill="#D8EEE9"/>
+    <path d="M11 23c5-10 13-9 15-10-1 9-5 14-13 14-2 0-3-1-4-2 1-1 1-1 2-2Z" fill="#0F766E"/>
+    <text x="52" y="15" class="nav" style="font-weight:700;">兴趣助手</text>
+    <text x="52" y="35" class="small">10:25 · 正在生成计划</text>
+    <text x="52" y="65" class="body">可以。我们先不把它当成“学摄影”，而是给周末留一个</text>
+    <text x="52" y="89" class="body">观察周围的理由。我整理了一份足够轻的尝试方案。</text>
+
+    <g transform="translate(52 112)" filter="url(#shadow)">
+      <rect width="576" height="286" rx="8" fill="#FFFFFF" stroke="#D1DFDA"/>
+      <rect x="0" y="0" width="576" height="44" rx="8" fill="#F2F8F6"/>
+      <path d="M21 22l5 5 9-12" fill="none" stroke="#0F766E" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+      <text x="44" y="27" class="label">待你确认 · 兴趣与任务草稿</text>
+      <text x="24" y="77" class="title">用手机摄影重新感受周末</text>
+      <text x="24" y="101" class="meta">目标：不买设备，用 3 次 20 分钟散步建立观察习惯</text>
+      <line x1="24" y1="120" x2="552" y2="120" stroke="#E1E9E5"/>
+      <circle cx="35" cy="148" r="9" fill="#D8EEE9"/><text x="32" y="152" class="label" style="font-size:11px;">1</text>
+      <text x="56" y="153" class="body">选一个熟悉街区，只拍“有光的地方”</text>
+      <circle cx="35" cy="182" r="9" fill="#D8EEE9"/><text x="32" y="186" class="label" style="font-size:11px;">2</text>
+      <text x="56" y="187" class="body">回家挑一张照片，说说它让你停下的原因</text>
+      <circle cx="35" cy="216" r="9" fill="#D8EEE9"/><text x="32" y="220" class="label" style="font-size:11px;">3</text>
+      <text x="56" y="221" class="body">下次聊天时，我们根据感受调整方向</text>
+      <text x="24" y="250" class="small">3 个步骤 · 不设提醒 · 可随时调整</text>
+      <rect x="339" y="234" width="104" height="36" rx="6" fill="#0F766E"/>
+      <text x="360" y="257" class="button">确认计划</text>
+      <text x="465" y="257" class="label">编辑</text>
+      <text x="510" y="257" class="label">重生成</text>
+    </g>
+  </g>
+
+  <!-- composer -->
+  <rect x="304" y="890" width="772" height="110" rx="8" fill="#FFFFFF" stroke="#D1DFDA" filter="url(#shadow)"/>
+  <text x="328" y="925" class="body" fill="#62706A">可以告诉我，最近有什么让你有一点想靠近？</text>
+  <text x="328" y="970" class="small">Enter 发送 · Shift + Enter 换行</text>
+  <rect x="1016" y="934" width="40" height="40" rx="7" fill="#0F766E"/>
+  <path d="m1028 953 15-8-7 15-3-5-5-2Z" fill="none" stroke="#FFFFFF" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <!-- context rail -->
+  <rect x="1100" y="0" width="340" height="1024" fill="#FFFFFF"/>
+  <line x1="1100" y1="0" x2="1100" y2="1024" stroke="#D9E2DE"/>
+  <text x="1128" y="46" class="title" style="font-size:16px;">本次对话</text>
+  <text x="1128" y="69" class="small">只展示已确认的信息</text>
+  <line x1="1128" y1="92" x2="1412" y2="92" stroke="#E7ECE9"/>
+  <text x="1128" y="128" class="small" style="font-weight:700; letter-spacing:.4px;">已确认的兴趣</text>
+  <rect x="1128" y="146" width="256" height="62" rx="7" fill="#F5F7F6"/>
+  <circle cx="1152" cy="170" r="11" fill="#D8EEE9"/>
+  <path d="m1147 174 5-9 5 9" fill="none" stroke="#0F766E" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="1172" y="168" class="nav" style="font-weight:700;">城市摄影</text>
+  <text x="1172" y="188" class="small">探索中 · 2026-08-03</text>
+  <text x="1128" y="247" class="small" style="font-weight:700; letter-spacing:.4px;">进行中的任务</text>
+  <text x="1128" y="277" class="nav">还没有已确认的任务</text>
+  <text x="1128" y="299" class="small">确认草稿后会出现在这里</text>
+  <line x1="1128" y1="326" x2="1412" y2="326" stroke="#E7ECE9"/>
+  <text x="1128" y="362" class="small" style="font-weight:700; letter-spacing:.4px;">记忆</text>
+  <text x="1128" y="391" class="nav">偏好从轻量、可调整的尝试开始</text>
+  <text x="1128" y="414" class="small">最近更新于 10:25</text>
+  <line x1="1128" y1="445" x2="1412" y2="445" stroke="#E7ECE9"/>
+  <rect x="1128" y="474" width="256" height="42" rx="7" fill="#FFF7ED"/>
+  <circle cx="1150" cy="495" r="8" fill="#FDE5C3"/>
+  <path d="M1150 490v6M1150 500h.01" stroke="#9A4E05" stroke-width="1.5" stroke-linecap="round"/>
+  <text x="1168" y="500" class="label" style="fill:#9A4E05;">待确认 1 项</text>
+  <text x="1128" y="564" class="small">上下文仅在管理员启用后参与回答</text>
+</svg>

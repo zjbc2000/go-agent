@@ -48,15 +48,14 @@ services:
     # TODO(Task 3): real sandbox Dockerfile; placeholder image for wiring.
     image: python:3.11-slim
     profiles: ["full"]
-    # PYTHONPATH must lead with the sandbox root so `app` resolves to the worker
-    # package (which merges the agent-service `app` submodules it reuses) instead
-    # of the standalone agent-service `app` on the editable-install path.
+    # PYTHONPATH must lead with the sandbox root so `worker.*` resolves
+    # and `app.*` resolves from the agent-service editable install.
     working_dir: /app
     environment:
       PYTHONPATH: /app
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@host.docker.internal:54322/postgres
       RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
-    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    command: ["celery", "-A", "worker.celery_app", "worker", "--loglevel=info"]
     depends_on:
       rabbitmq:
         condition: service_healthy

@@ -21,6 +21,10 @@ DEV_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postg
 # 5672/15672 on this machine; production must set RABBITMQ_URL explicitly.
 DEV_RABBITMQ_URL = "amqp://guest:guest@127.0.0.1:5672/"
 
+# DEV-ONLY default: the shared secret for HMAC-signed sandbox tool grants.
+# Production must set AGENT_TOOL_GRANT_SECRET; this value must never be deployed.
+DEV_TOOL_GRANT_SECRET = "dev-tool-grant-secret"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -41,6 +45,8 @@ class Settings:
     outbox_backoff_base_seconds: int = 10
     outbox_backoff_cap_seconds: int = 600
     outbox_poller_enabled: bool = True
+    # Sandbox tool-grant shared secret (Task 3).
+    tool_grant_secret: str = DEV_TOOL_GRANT_SECRET
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -61,4 +67,5 @@ class Settings:
             outbox_backoff_base_seconds=int(os.getenv("OUTBOX_BACKOFF_BASE_SECONDS", "10")),
             outbox_backoff_cap_seconds=int(os.getenv("OUTBOX_BACKOFF_CAP_SECONDS", "600")),
             outbox_poller_enabled=os.getenv("OUTBOX_POLLER_ENABLED", "true").lower() != "false",
+            tool_grant_secret=os.getenv("AGENT_TOOL_GRANT_SECRET", DEV_TOOL_GRANT_SECRET),
         )

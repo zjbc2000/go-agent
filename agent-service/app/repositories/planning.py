@@ -236,6 +236,22 @@ class DocumentRepository:
                 for row in rows
             ]
 
+    async def delete(self, context: RequestContext, document_id: uuid.UUID) -> bool:
+        """Hard-delete the caller's document (RLS-gated to the owner).
+
+        Returns True if a row was deleted, False if the document was not found
+        or not owned by the caller.
+        """
+        async with self._transaction(context) as session:
+            document = await session.scalar(
+                select(DocumentRecord).where(DocumentRecord.id == document_id)
+            )
+            if document is None:
+                return False
+            await session.delete(document)
+            await session.flush()
+            return True
+
     async def restore_version(
         self, context: RequestContext, document_id: uuid.UUID, version_id: uuid.UUID
     ) -> Document:

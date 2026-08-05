@@ -7,7 +7,7 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.chat.provider import build_provider
@@ -16,7 +16,9 @@ from app.chat.service import ChatService
 from app.core.config import Settings
 from app.core.crypto import LocalEnvelopeCipher
 from app.core.errors import ApiError, api_error_handler
+from app.execution.grant import GrantVerifier
 from app.execution.publisher import AioPikaRabbitMqClient, OutboxPublisher
+from app.execution.tool_broker import ToolBroker
 from app.planning.router import router as planning_router
 from app.planning.service import PlanningService
 from app.repositories.chat import ChatRepository
@@ -87,9 +89,50 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.planning_repository = planning_repository
     app.state.skill_service = skill_service
     app.state.outbox_publisher = publisher
+    grant_verifier = GrantVerifier(settings.tool_grant_secret)
+    tool_broker = ToolBroker(
+        session_factory=session_factory,
+        documents=planning_repository,
+        cipher=cipher,
+        grant_verifier=grant_verifier,
+    )
+    app.state.tool_broker = tool_broker
     app.include_router(chat_router)
     app.include_router(planning_router)
     app.include_router(skills_router)
+
+    # --- Internal sandbox tool broker route ---
+
+    @app.post("/internal/v1/sandbox/tools/invoke")
+    async def sandbox_tool_invoke(request: Request):
+        """Broker a tool invocation from an isolated sandbox container.
+
+        Authenticated via the ``X-Tool-Grant`` header (NOT the standard
+        internal token + JWT — the sandbox container has only the grant).
+        """
+        grant_token = request.headers.get("X-Tool-Grant", "")
+        if not grant_token:
+            raise ApiError("SANDBOX_GRANT_INVALID", "Missing X-Tool-Grant header.", False)
+        try:
+            body = await request.json()
+        except ValueError:
+            raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False) from None
+        if not isinstance(body, dict):
+            raise ApiError("VALIDATION_FAILED", "Request body must be an object.", False)
+        step_id = body.get("step_id")
+        tool_id = body.get("tool_id")
+        input_data = body.get("input")
+        if not isinstance(step_id, str) or not step_id.strip():
+            raise ApiError("VALIDATION_FAILED", "step_id is required.", False)
+        if not isinstance(tool_id, str) or not tool_id.strip():
+            raise ApiError("VALIDATION_FAILED", "tool_id is required.", False)
+        if not isinstance(input_data, dict):
+            raise ApiError("VALIDATION_FAILED", "input must be an object.", False)
+        result = await tool_broker.invoke(grant_token, step_id, tool_id, input_data)
+        return {"data": result.data} if result.success else {
+            "error": {"code": result.error_code, "message": result.error_message}
+        }
+
     return app
 
 

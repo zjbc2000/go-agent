@@ -17,13 +17,13 @@ import uuid
 from dataclasses import dataclass
 
 import pytest
-from app.audit import MemoryAuditStore
-from app.config import sync_database_url
 from app.core.crypto import LocalEnvelopeCipher
-from app.repository import WorkerRepository
-from app.runtime import StubRuntime
-from app.tasks import SandboxExecutor
 from sqlalchemy import create_engine, text
+from worker.audit import MemoryAuditStore
+from worker.config import sync_database_url
+from worker.repository import WorkerRepository
+from worker.runtime import StubRuntime
+from worker.tasks import SandboxExecutor
 
 # Dev/test-only key. Never use the all-zero key outside tests.
 TEST_KEY = base64.urlsafe_b64encode(b"0" * 32).decode()
@@ -34,10 +34,10 @@ DATABASE_URL = os.getenv(
 )
 
 _TRUNCATE = (
-    "truncate table public.mcp_tools, public.mcp_servers, public.outbox_events, "
-    "public.sandbox_runs, public.execution_approvals, public.audit_logs, "
-    "public.approvals, public.document_drafts, public.document_versions, "
-    "public.documents cascade"
+    "truncate table public.sandbox_tool_calls, public.mcp_tools, public.mcp_servers, "
+    "public.outbox_events, public.sandbox_runs, public.execution_approvals, "
+    "public.audit_logs, public.approvals, public.document_drafts, "
+    "public.document_versions, public.documents cascade"
 )
 
 # A write skill whose only step is the step the idempotency test watches.

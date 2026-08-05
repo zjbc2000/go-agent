@@ -6,6 +6,10 @@ pinned ``document_versions`` row. The isolated sandbox CONTAINER gets no databas
 credentials — that is Task 3. ``plan_hash`` pins the re-derived plan to the exact
 version the service compiled against; recompiling the pinned document body with
 the run's stored inputs reproduces the same immutable plan.
+
+Lease-based claim (Task 3 I1): ``claim`` now atomically transitions queued->running
+OR re-claims a stale running row whose ``claimed_at`` is older than the lease TTL,
+so a crashed worker's stuck running row is recoverable.
 """
 
 from __future__ import annotations
@@ -13,19 +17,23 @@ from __future__ import annotations
 import json
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import create_engine, select, update
-from sqlalchemy.engine import Engine
-
-from app.config import sync_database_url
 from app.core.crypto import EnvelopeCipher
 from app.models.execution import SandboxRun as SandboxRunRecord
 from app.models.planning import DocumentVersion as DocumentVersionRecord
 from app.skills.compiler import compile_skill
 from app.skills.schemas import ExecutionPlan
+from sqlalchemy import create_engine, select, update
+from sqlalchemy.engine import Engine
+
+from worker.config import sync_database_url
 
 TERMINAL_STATUSES = frozenset({"succeeded", "failed", "timed_out", "policy_denied"})
+
+# A run stuck in ``running`` for longer than this window is re-claimable
+# (the worker that claimed it is presumed dead).
+LEASE_TTL = timedelta(minutes=5)
 
 
 def _utcnow() -> datetime:
@@ -38,6 +46,7 @@ class ClaimedRun:
 
     id: str
     plan: ExecutionPlan
+    user_id: uuid.UUID
 
 
 class WorkerRepository:
@@ -59,32 +68,44 @@ class WorkerRepository:
             ).scalar_one_or_none()
 
     def claim(self, run_id: str) -> ClaimedRun | None:
-        """Atomically transition queued -> running; exactly one caller can win.
+        """Atomically claim a run (queued or stale-running) and load its plan.
 
-        The conditional ``UPDATE ... WHERE status = 'queued' RETURNING ...`` makes
-        the transition atomic: a concurrent or duplicate delivery sees no row and
-        gets None, so only the claim winner proceeds to the runtime.
+        Lease-based (Task 3 I1): a run stuck in ``running`` whose ``claimed_at``
+        is older than ``LEASE_TTL`` is re-claimable — the original worker is
+        presumed dead. A fresh ``running`` row is not claimable (exactly one
+        winner).
         """
         run_id_uuid = uuid.UUID(run_id)
         now = _utcnow()
+        stale_threshold = now - LEASE_TTL
         with self._engine.begin() as conn:
             row = conn.execute(
                 update(SandboxRunRecord)
-                .where(SandboxRunRecord.id == run_id_uuid, SandboxRunRecord.status == "queued")
-                .values(status="running", started_at=now, updated_at=now)
+                .where(
+                    SandboxRunRecord.id == run_id_uuid,
+                    (
+                        (SandboxRunRecord.status == "queued")
+                        | (
+                            (SandboxRunRecord.status == "running")
+                            & (SandboxRunRecord.claimed_at < stale_threshold)
+                        )
+                    ),
+                )
+                .values(status="running", claimed_at=now, started_at=now, updated_at=now)
                 .returning(
                     SandboxRunRecord.id,
                     SandboxRunRecord.document_id,
                     SandboxRunRecord.version_id,
                     SandboxRunRecord.plan_hash,
                     SandboxRunRecord.inputs_ciphertext,
+                    SandboxRunRecord.user_id,
                 )
             ).first()
         if row is None:
             return None
-        claimed_id, document_id, version_id, _plan_hash, inputs_ciphertext = row
+        claimed_id, document_id, version_id, _plan_hash, inputs_ciphertext, user_id = row
         plan = self._load_plan(document_id, version_id, inputs_ciphertext)
-        return ClaimedRun(id=str(claimed_id), plan=plan)
+        return ClaimedRun(id=str(claimed_id), plan=plan, user_id=user_id)
 
     def finish(self, run_id: str, *, status: str, error_code: str | None = None) -> None:
         """Mark a run terminal (succeeded / failed / ...)."""

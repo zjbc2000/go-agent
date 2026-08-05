@@ -8,7 +8,7 @@ double-claim has exactly one winner.
 
 import threading
 
-from app.repository import WorkerRepository
+from worker.repository import WorkerRepository
 
 
 def test_duplicate_task_executes_each_step_once(worker, seeded_run, audit):

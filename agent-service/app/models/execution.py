@@ -86,6 +86,7 @@ class SandboxRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
     idempotency_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
@@ -108,6 +109,28 @@ class OutboxEvent(Base):
     attempts: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     next_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+
+class SandboxToolCall(Base):
+    """A redacted audit trail of tool invocations from sandbox containers (Task 3).
+
+    UNIQUE(run_id, step_id) makes every side effect idempotent by run+step —
+    a retried step never re-executes. Raw input content is never stored.
+    """
+
+    __tablename__ = "sandbox_tool_calls"
+    __table_args__ = (
+        Index("sandbox_tool_calls_run_id_idx", "run_id"),
+        Index("sandbox_tool_calls_user_id_idx", "user_id"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    run_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False)
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
+    step_id: Mapped[str] = mapped_column(Text, nullable=False)
+    tool_id: Mapped[str] = mapped_column(Text, nullable=False)
+    result_status: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 

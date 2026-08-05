@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from app.core.config import DEV_CRYPTO_KEY, DEV_DATABASE_URL
 
 DEV_RABBITMQ_URL = "amqp://guest:guest@127.0.0.1:5672/"
+DEV_TOOL_GRANT_SECRET = "dev-tool-grant-secret"
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,7 @@ class WorkerConfig:
     database_url: str
     rabbitmq_url: str
     crypto_key_b64: str
+    tool_grant_secret: str
     outbox_queue: str = "sandbox.execute"
 
     @classmethod
@@ -29,6 +31,7 @@ class WorkerConfig:
             database_url=os.getenv("DATABASE_URL", DEV_DATABASE_URL),
             rabbitmq_url=os.getenv("RABBITMQ_URL", DEV_RABBITMQ_URL),
             crypto_key_b64=os.getenv("AGENT_CRYPTO_KEY", DEV_CRYPTO_KEY),
+            tool_grant_secret=os.getenv("AGENT_TOOL_GRANT_SECRET", DEV_TOOL_GRANT_SECRET),
             outbox_queue=os.getenv("OUTBOX_QUEUE", "sandbox.execute"),
         )
 

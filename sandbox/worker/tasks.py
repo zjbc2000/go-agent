@@ -7,14 +7,19 @@ queued->running conditional update that exactly one caller can win, and the audi
 store is keyed by ``(sandbox_run_id, step_id)`` so a step can never be recorded
 twice. A crash or duplicate delivery can therefore never produce duplicate step
 writes.
+
+Task 3 extends the executor: ``claim`` is now a lease (stale running rows are
+re-claimable, I1), the stub runtime is swapped for the isolated Docker runtime,
+and a signed tool grant is minted for each run so the sandbox container can call
+the broker.
 """
 
 from __future__ import annotations
 
 import logging
 
-from app.repository import WorkerRepository
-from app.runtime import Runtime
+from worker.repository import WorkerRepository
+from worker.runtime import Runtime
 
 logger = logging.getLogger(__name__)
 

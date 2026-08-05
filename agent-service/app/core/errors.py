@@ -21,6 +21,7 @@ ErrorCode = Literal[
     "MCP_UNAVAILABLE",
     "SANDBOX_DENIED",
     "SANDBOX_TIMEOUT",
+    "SANDBOX_GRANT_INVALID",
     "INTERNAL_ERROR",
 ]
 
@@ -39,6 +40,7 @@ _STATUS_BY_CODE: Final[dict[ErrorCode, int]] = {
     "MCP_UNAVAILABLE": 503,
     "SANDBOX_DENIED": 403,
     "SANDBOX_TIMEOUT": 504,
+    "SANDBOX_GRANT_INVALID": 403,
     "INTERNAL_ERROR": 500,
 }
 

@@ -10,15 +10,15 @@ from __future__ import annotations
 
 import os
 
+from app.core.crypto import LocalEnvelopeCipher
 from celery import Celery
 from kombu import Queue
 
-from app.audit import MemoryAuditStore
-from app.config import WorkerConfig
-from app.core.crypto import LocalEnvelopeCipher
-from app.repository import WorkerRepository
-from app.runtime import StubRuntime
-from app.tasks import SandboxExecutor
+from worker.audit import MemoryAuditStore
+from worker.config import WorkerConfig
+from worker.repository import WorkerRepository
+from worker.runtime import StubRuntime
+from worker.tasks import SandboxExecutor
 
 celery_app = Celery("goudan-sandbox")
 celery_app.conf.broker_url = os.getenv("RABBITMQ_URL", "amqp://guest:guest@127.0.0.1:5672/")

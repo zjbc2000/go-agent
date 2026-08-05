@@ -32,8 +32,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         provider=build_provider(settings),
         retention=timedelta(seconds=settings.stream_event_retention_seconds),
     )
+    planning_repository = DocumentRepository(session_factory=session_factory, cipher=cipher)
     planning_service = PlanningService(
-        repository=DocumentRepository(session_factory=session_factory, cipher=cipher),
+        repository=planning_repository,
         cipher=cipher,
         chat=service,
     )
@@ -41,6 +42,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.settings = settings
     app.state.chat_service = service
     app.state.planning_service = planning_service
+    app.state.planning_repository = planning_repository
     app.include_router(chat_router)
     app.include_router(planning_router)
     return app

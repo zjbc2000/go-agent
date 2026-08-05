@@ -53,6 +53,18 @@ class Document:
     updated_at: datetime
 
 
+@dataclass(frozen=True)
+class DocumentVersionInfo:
+    """A decrypted, immutable version row of a planning document."""
+
+    id: uuid.UUID
+    document_id: uuid.UUID
+    version: int
+    title: str
+    body: str
+    created_at: datetime
+
+
 class DocumentRepository:
     """Persistence boundary for encrypted, versioned planning documents."""
 
@@ -190,6 +202,39 @@ class DocumentRepository:
                 return None
             current = await self._current_version_row(session, document)
             return self._to_document(document, current.id)
+
+    async def list_versions(
+        self, context: RequestContext, document_id: uuid.UUID
+    ) -> list[DocumentVersionInfo]:
+        """List the caller's version rows for a document, oldest first (RLS).
+
+        The document lookup is user-scoped, so a document the caller does not own is
+        never visible and surfaces as NOT_FOUND.
+        """
+        async with self._transaction(context) as session:
+            document = await session.scalar(
+                select(DocumentRecord).where(DocumentRecord.id == document_id)
+            )
+            if document is None:
+                raise ApiError("NOT_FOUND", "Document not found.", False)
+            rows = (
+                await session.scalars(
+                    select(DocumentVersionRecord)
+                    .where(DocumentVersionRecord.document_id == document_id)
+                    .order_by(DocumentVersionRecord.version.asc())
+                )
+            ).all()
+            return [
+                DocumentVersionInfo(
+                    id=row.id,
+                    document_id=row.document_id,
+                    version=row.version,
+                    title=self._cipher.decrypt(row.title_ciphertext),
+                    body=self._cipher.decrypt(row.body_ciphertext),
+                    created_at=row.created_at,
+                )
+                for row in rows
+            ]
 
     async def restore_version(
         self, context: RequestContext, document_id: uuid.UUID, version_id: uuid.UUID

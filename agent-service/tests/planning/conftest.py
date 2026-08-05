@@ -9,13 +9,27 @@ so each synthetic test user is provisioned a matching row before the test body r
 import os
 import uuid
 from collections.abc import AsyncIterator
+from datetime import timedelta
 
 import pytest
-from app.core.context import RequestContext, new_request_id
+from app.api.deps import decode_request_context
+from app.chat.deps import get_request_context
+from app.chat.provider import DeterministicProvider
+from app.chat.service import ChatService
+from app.core.config import Settings
+from app.core.context import RequestContext, UserRole, new_request_id
 from app.core.crypto import LocalEnvelopeCipher
+from app.core.errors import ApiError
+from app.main import create_app
+from app.planning.service import PlanningService
+from app.repositories.chat import ChatRepository
 from app.repositories.planning import DocumentRepository
+from fastapi import Header
+from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+
+TEST_INTERNAL_TOKEN = "test-internal-token"
 
 # Local Supabase Postgres (see `supabase status`). Override with TEST_DATABASE_URL
 # to point at a different database.
@@ -87,3 +101,78 @@ async def user_b(db_session: AsyncSession) -> RequestContext:
     user_id = uuid.uuid4()
     await _provision_user(db_session, user_id)
     return _context(user_id)
+
+
+@pytest.fixture
+def chat_repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> ChatRepository:
+    return ChatRepository(
+        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
+    )
+
+
+@pytest.fixture
+def service(
+    repository: DocumentRepository, chat_repository: ChatRepository, cipher: LocalEnvelopeCipher
+) -> PlanningService:
+    """A planning service wired to the test DB and a deterministic chat service."""
+    chat = ChatService(chat_repository, DeterministicProvider(), timedelta(days=7))
+    return PlanningService(repository=repository, cipher=cipher, chat=chat)
+
+
+@pytest.fixture
+async def pending_approval(service: PlanningService, user_context: RequestContext) -> uuid.UUID:
+    """A freshly created pending approval owned by the default test user."""
+    draft = await service.create_document_draft(user_context, type="task", title="pending", body="body")
+    return draft.approval_id
+
+
+# --- API fixtures ------------------------------------------------------------
+
+def _fake_jwt_verifier(token: str) -> dict:
+    """Verify a test token of the form ``Bearer <uuid>`` without any network call."""
+    try:
+        user_id = uuid.UUID(token)
+    except (ValueError, TypeError):
+        raise ApiError("AUTH_REQUIRED", "Invalid authentication token.", False) from None
+    return {"sub": str(user_id)}
+
+
+def _fake_role_loader(user_id: uuid.UUID) -> UserRole:
+    return "user"
+
+
+@pytest.fixture
+def app_settings() -> Settings:
+    return Settings(internal_token=TEST_INTERNAL_TOKEN)
+
+
+@pytest.fixture
+def test_app(app_settings: Settings):
+    """A FastAPI app with the user-JWT dependency replaced by a fake verifier."""
+    app = create_app(settings=app_settings)
+
+    def fake_context(authorization: str | None = Header(None)) -> RequestContext:
+        return decode_request_context(
+            authorization,
+            jwt_verifier=_fake_jwt_verifier,
+            role_loader=_fake_role_loader,
+        )
+
+    app.dependency_overrides[get_request_context] = fake_context
+    return app
+
+
+@pytest.fixture
+def client(test_app):
+    # Entering the TestClient keeps ONE portal/event loop for all requests in a test, so
+    # the app's async engine pool never crosses event loops.
+    with TestClient(test_app) as test_client:
+        yield test_client
+
+
+@pytest.fixture
+def api_headers(user_context: RequestContext) -> dict[str, str]:
+    return {
+        "X-Internal-Token": TEST_INTERNAL_TOKEN,
+        "Authorization": f"Bearer {user_context.user_id}",
+    }

@@ -11,7 +11,10 @@ from app.chat.service import ChatService
 from app.core.config import Settings
 from app.core.crypto import LocalEnvelopeCipher
 from app.core.errors import ApiError, api_error_handler
+from app.planning.router import router as planning_router
+from app.planning.service import PlanningService
 from app.repositories.chat import ChatRepository
+from app.repositories.planning import DocumentRepository
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -29,10 +32,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         provider=build_provider(settings),
         retention=timedelta(seconds=settings.stream_event_retention_seconds),
     )
+    planning_service = PlanningService(
+        repository=DocumentRepository(session_factory=session_factory, cipher=cipher),
+        cipher=cipher,
+        chat=service,
+    )
 
     app.state.settings = settings
     app.state.chat_service = service
+    app.state.planning_service = planning_service
     app.include_router(chat_router)
+    app.include_router(planning_router)
     return app
 
 

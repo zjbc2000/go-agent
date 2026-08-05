@@ -130,6 +130,24 @@ class ChatService:
         before = datetime.now(UTC) - self._retention
         return await self._repo.purge_expired_events(before)
 
+    async def complete_run_with_message(
+        self, context: RequestContext, run_id: UUID, content: str
+    ) -> None:
+        """Finalize a run's assistant message with ``content`` and mark it completed.
+
+        No-op when the run is already terminal. Used by the planning service to emit
+        the ``run.completed`` notification after a document approval commits; the
+        approval transaction is the atomic unit, this event is a follow-on.
+        """
+        run = await self._repo.get_run(context, run_id)
+        if run is None or run.status in ("completed", "failed", "cancelled"):
+            return
+        await self._repo.finalize_message(context, run.assistant_message_id, content)
+        await self._repo.update_run_status(context, run_id, "completed")
+        await self._repo.append_event(
+            run_id, "run.completed", json.dumps({"messageId": str(run.assistant_message_id)})
+        )
+
     async def _generate(
         self, context: RequestContext, run_id: UUID, skip: int
     ) -> AsyncIterator[StreamEvent]:

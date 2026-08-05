@@ -1,6 +1,7 @@
 """Envelope encryption port backed by Fernet for local development."""
 
-from typing import Protocol
+import json
+from typing import Any, Protocol
 
 from cryptography.fernet import Fernet, MultiFernet
 
@@ -11,6 +12,8 @@ class EnvelopeCipher(Protocol):
     def encrypt(self, plaintext: str) -> str: ...
 
     def decrypt(self, ciphertext: str) -> str: ...
+
+    def decrypt_json(self, ciphertext: str) -> dict[str, Any]: ...
 
 
 class LocalEnvelopeCipher:
@@ -28,3 +31,6 @@ class LocalEnvelopeCipher:
 
     def decrypt(self, ciphertext: str) -> str:
         return self._fernet.decrypt(ciphertext.encode()).decode()
+
+    def decrypt_json(self, ciphertext: str) -> dict[str, Any]:
+        return json.loads(self.decrypt(ciphertext))

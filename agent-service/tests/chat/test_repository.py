@@ -16,7 +16,9 @@ async def test_create_run_is_idempotent(chat_repository, user_context):
 
 async def test_raw_message_column_never_contains_plaintext(db_session, chat_repository, user_context):
     await chat_repository.create_run(user_context, SESSION_ID, "private", "req-2")
-    assert "private" not in await db_session.scalar(text("select content_ciphertext from messages limit 1"))
+    rows = (await db_session.execute(text("select content_ciphertext from messages"))).all()
+    assert len(rows) == 2  # user message + assistant placeholder
+    assert all("private" not in row[0] for row in rows)
 
 
 async def test_create_run_returns_queued_run(chat_repository, user_context):

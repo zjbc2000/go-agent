@@ -9,13 +9,37 @@ from dataclasses import dataclass
 # from the cloud KMS; this value must never be deployed.
 DEV_CRYPTO_KEY = base64.urlsafe_b64encode(b"0" * 32).decode()
 
+# DEV-ONLY default: the shared token the BFF uses to call internal routes. Production
+# must set AGENT_INTERNAL_TOKEN; the app refuses to start for internal routing if the
+# env token is unset AND this dev token is still in use.
+DEV_INTERNAL_TOKEN = "dev-internal-token"
+
+# DEV-ONLY default: the local Supabase Postgres used by `supabase db reset`.
+DEV_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
+
 
 @dataclass(frozen=True)
 class Settings:
     app_name: str = "Goudan Agent API"
     version: str = "1.0.0"
     crypto_key_b64: str = DEV_CRYPTO_KEY
+    database_url: str = DEV_DATABASE_URL
+    internal_token: str = DEV_INTERNAL_TOKEN
+    provider_base_url: str | None = None
+    provider_api_key: str | None = None
+    provider_model: str = "gpt-4o-mini"
+    stream_event_retention_seconds: int = 7 * 24 * 60 * 60
 
     @classmethod
     def from_env(cls) -> "Settings":
-        return cls(crypto_key_b64=os.getenv("AGENT_CRYPTO_KEY", DEV_CRYPTO_KEY))
+        return cls(
+            crypto_key_b64=os.getenv("AGENT_CRYPTO_KEY", DEV_CRYPTO_KEY),
+            database_url=os.getenv("DATABASE_URL", DEV_DATABASE_URL),
+            internal_token=os.getenv("AGENT_INTERNAL_TOKEN", DEV_INTERNAL_TOKEN),
+            provider_base_url=os.getenv("AGENT_PROVIDER_BASE_URL") or None,
+            provider_api_key=os.getenv("AGENT_PROVIDER_API_KEY") or None,
+            provider_model=os.getenv("AGENT_PROVIDER_MODEL", "gpt-4o-mini"),
+            stream_event_retention_seconds=int(
+                os.getenv("AGENT_STREAM_EVENT_RETENTION_SECONDS", str(7 * 24 * 60 * 60))
+            ),
+        )

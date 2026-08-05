@@ -31,6 +31,10 @@ export function VersionHistory({ documentId, onRestored }: VersionHistoryProps) 
     try {
       await planningRepo.restoreVersion(documentId, versionId);
       toast.success("版本已恢复");
+      // Re-fetch the version list so the newly created version appears here, then
+      // let the document list refresh its current version number.
+      const rows = await planningRepo.listVersions(documentId);
+      setVersions(rows);
       onRestored();
     } catch {
       toast.error("恢复失败");

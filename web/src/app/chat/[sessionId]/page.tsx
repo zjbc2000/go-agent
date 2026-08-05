@@ -32,6 +32,15 @@ export default function ChatSessionPage({
     loadMessages(chatRepo, sessionId);
   }, [sessionId, chatRepo, setActiveSession, loadMessages]);
 
+  // DEV-ONLY test seam: expose the Zustand chat store so a real-stack E2E can inject
+  // a draft card. Real drafts arrive via the deferred `document.draft` SSE event; until
+  // that producer exists, the E2E bridges it here. Dead-code-eliminated in production.
+  useEffect(() => {
+    if (process.env.NODE_ENV === "development") {
+      (window as { __chatStore?: typeof useChatStore }).__chatStore = useChatStore;
+    }
+  }, []);
+
   const session = sessions.find((s) => s.id === sessionId);
   const sessionDrafts = drafts.filter((d) => d.sessionId === sessionId);
 

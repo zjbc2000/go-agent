@@ -117,13 +117,21 @@ class ToolBroker:
         if not won:
             return await self._handle_loser(run_id_str, step_id, grant.user_id)
 
-        # 7. Execute the tool with the plan's COMPILED input (NEW #1), never the
-        #    caller's input.
-        result = await self._execute_tool(context, step_tool, step_input)
-
-        # 8. Finalize the reserved row with the result (NEW #3: always store
-        #    non-NULL ciphertext so failed replays return the actual failure).
-        await self._store_tool_call_result(run_id_str, step_id, result)
+        # 7. Execute + finalize in a try/finally (NEW #3 MINOR): ANY exception
+        #    (validation error, DB error, crash-like) persists a ``failed`` final
+        #    state — never leaves a permanently stuck ``reserved`` row.
+        try:
+            result = await self._execute_tool(context, step_tool, step_input)
+        except Exception:
+            result = ToolResult(
+                success=False, error_code="SANDBOX_ERROR",
+                error_message="Tool execution raised an unexpected error.",
+            )
+            raise
+        finally:
+            # Always finalize: success stores the data; failure stores the error
+            # (NEW #3 IMPORTANT: failed rows carry success=False on replay).
+            await self._store_tool_call_result(run_id_str, step_id, result)
 
         return result
 
@@ -259,7 +267,12 @@ class ToolBroker:
                 error_message="This step is currently executing; retry.",
             )
         if row["result_ciphertext"] is not None:
-            return ToolResult(success=True, data=row["result_ciphertext"])
+            # NEW #3 IMPORTANT: return the stored result WITH the correct
+            # success/failure status — a replayed failed step reports failure.
+            return ToolResult(
+                success=(row["result_status"] == "succeeded"),
+                data=row["result_ciphertext"],
+            )
         return ToolResult(success=row["result_status"] == "succeeded",
                           data={"replayed": True})
 

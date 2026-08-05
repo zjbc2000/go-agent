@@ -61,6 +61,11 @@ _NON_GLOBAL_NETS = [
     # entire ::/96 range (minus ::1/128 which is already covered) because the
     # embedded v4 is checked per-address below.
     ipaddress.IPv6Network("::/96"),             # IPv4-compatible (checked per-addr)
+    # NEW #5: same-family IPv4-embedding ranges — 6to4, NAT64, Teredo.
+    ipaddress.IPv6Network("2002::/16"),          # 6to4 (embeds IPv4)
+    ipaddress.IPv6Network("64:ff9b::/96"),       # NAT64 well-known prefix
+    ipaddress.IPv6Network("64:ff9b:1::/48"),     # NAT64 (reserved)
+    ipaddress.IPv6Network("2001::/32"),          # Teredo
 ]
 
 

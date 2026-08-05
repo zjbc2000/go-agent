@@ -23,6 +23,9 @@ from worker.policy import PolicyDenied, SandboxPolicy
         "http://[::ffff:192.168.1.1]",
         # NEW #5: IPv4-compatible-IPv6 bypass
         "http://[::127.0.0.1]",
+        # NEW #5: 6to4, NAT64, Teredo embedding loops
+        "http://[2002:7f00:1::1]",        # 6to4 with 127.0.0.1 embedded
+        "http://[64:ff9b::7f00:1]",       # NAT64 with 127.0.0.1
     ],
 )
 def test_network_policy_rejects_non_public_targets(url: str):

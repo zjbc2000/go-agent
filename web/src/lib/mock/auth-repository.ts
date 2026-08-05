@@ -9,6 +9,7 @@ const MOCK_USER: User = {
   id: "user_1",
   name: "苟蛋用户",
   email: "user@goudan.app",
+  role: "user",
   avatarUrl: "",
 };
 

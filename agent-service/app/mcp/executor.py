@@ -32,10 +32,15 @@ class McpExecutor(Protocol):
     The broker calls this for steps whose tool is a registered MCP tool.
     The real transport runs the pinned MCP OCI image under the Task-3
     container security policy; the fake returns predetermined results.
+
+    ``registration`` carries the DB lookup result (server_image, schemas,
+    mutability, server_id) so the real executor can launch the correct image
+    without the broker having to understand transport details (IMPORTANT #2).
     """
 
     async def execute(
         self, tool_id: str, input: dict[str, Any],
+        registration: dict[str, Any],
     ) -> ToolResult: ...
 
 
@@ -51,6 +56,7 @@ class FakeMcpExecutor:
 
     async def execute(
         self, tool_id: str, input: dict[str, Any],
+        registration: dict[str, Any],
     ) -> ToolResult:
         """Return the pre-registered result, or a fallback success."""
         return self._results.get(

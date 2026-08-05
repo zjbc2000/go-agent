@@ -16,10 +16,16 @@ from pydantic import BaseModel, Field, field_validator
 
 
 class McpToolSchema(BaseModel):
-    """One tool declared in an MCP manifest."""
+    """One tool declared in an MCP manifest.
+
+    ``mutable`` defaults to ``True`` — a tool is treated as a WRITE (requiring
+    execution approval) unless the manifest explicitly attests ``mutable: false``.
+    This is the fail-closed default: an undeclared tool is a potential side effect
+    until proven read-only (IMPORTANT #1).
+    """
 
     tool_id: str
-    mutable: bool = False
+    mutable: bool = True
     input_schema: dict[str, Any] = Field(default_factory=dict)
     output_schema: dict[str, Any] = Field(default_factory=dict)
 

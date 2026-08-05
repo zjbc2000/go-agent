@@ -380,3 +380,93 @@ async def test_cross_user_mcp_server_denied(
     # User B has no registered MCP tool "echo.readonly" → disabled.
     assert not result.success
     assert result.error_code == "MCP_TOOL_DISABLED"
+
+
+# --- IMPORTANT #1: fail-closed mutable default gate ---
+
+_MCP_NO_MUTABLE_FIELD_MANIFEST = {
+    "schema_version": 1,
+    "allowed_tools": ["power.format"],
+    "steps": [
+        {"id": "pw1", "tool": "power.format",
+         "input": {"path": "{{path}}"}},
+    ],
+}
+
+
+async def _seed_power_tool(cipher: LocalEnvelopeCipher, engine: AsyncEngine,
+                           user_id: uuid.UUID) -> None:
+    """Register a tool WITHOUT an explicit mutable field (defaults to True)."""
+    from app.models.execution import McpServer as McpServerRecord
+    from app.models.execution import McpTool as McpToolRecord
+
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        sid = uuid.uuid4()
+        session.add(McpServerRecord(
+            id=sid, user_id=user_id, name="power-server",
+            image=f"oci://example/power@sha256:{PINNED_DIGEST}",
+            enabled=True, provenance="test", sbom="test",
+        ))
+        session.add(McpToolRecord(
+            id=uuid.uuid4(), user_id=user_id, server_id=sid,
+            tool_id="power.format", enabled=True, mutable=True,
+            # NOTE: this is the fail-closed default — the DB stores 'mutable'
+            # as True because the manifest didn't declare mutable: false.
+            input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+            output_schema={"type": "object"},
+        ))
+        await session.commit()
+
+
+@pytest.mark.asyncio
+async def test_power_tool_without_approval_rejected(
+    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
+    signer: GrantSigner, registry: McpRegistry, fake_executor: FakeMcpExecutor,
+):
+    """IMPORTANT #1: a tool registered WITHOUT ``mutable: false`` defaults to
+    mutable=True → requires an approval. Without one, the broker rejects.
+    """
+    user_id = uuid.uuid4()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        await _provision_user(session, user_id)
+    await _seed_power_tool(cipher, engine, user_id)
+    fake_executor.set_result("power.format", McpToolResult(
+        success=True, data={"formatted": True},
+    ))
+    # Seed a run WITHOUT approval.
+    run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
+        engine, cipher, user_id, _MCP_NO_MUTABLE_FIELD_MANIFEST,
+        inputs={"path": "/etc/hosts"}, with_approval=False,
+    )
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
+        step_ids=["pw1"], ttl_seconds=300,
+    )
+    with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
+        await broker.invoke(token, "pw1", "power.format", {"path": "/etc/hosts"})
+
+
+@pytest.mark.asyncio
+async def test_power_tool_with_approval_succeeds(
+    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
+    signer: GrantSigner, registry: McpRegistry, fake_executor: FakeMcpExecutor,
+):
+    """IMPORTANT #1: with an approval, a tool that defaulted to mutable succeeds."""
+    user_id = uuid.uuid4()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        await _provision_user(session, user_id)
+    await _seed_power_tool(cipher, engine, user_id)
+    fake_executor.set_result("power.format", McpToolResult(
+        success=True, data={"formatted": True},
+    ))
+    run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
+        engine, cipher, user_id, _MCP_NO_MUTABLE_FIELD_MANIFEST,
+        inputs={"path": "/tmp"}, with_approval=True,
+    )
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
+        step_ids=["pw1"], ttl_seconds=300,
+    )
+    result = await broker.invoke(token, "pw1", "power.format", {"path": "/tmp"})
+    assert result.success
+    assert result.data == {"formatted": True}

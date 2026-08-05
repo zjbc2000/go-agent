@@ -243,7 +243,56 @@ async def test_mutable_flag_is_persisted(
     reg = await registry.get_tool_registration(tester.user_id, "db.write")
     assert reg is not None
     assert reg["mutable"] is True
-    # Read-only tool.
+    # Read-only tool (explicitly declared mutable: false).
     reg_ro = await registry.get_tool_registration(tester.user_id, "echo.readonly")
     assert reg_ro is not None
     assert reg_ro["mutable"] is False
+
+
+# --- IMPORTANT #1: fail-closed mutable default ---
+
+_VALID_MANIFEST_POWER_TOOL: dict = {
+    "schema_version": 1,
+    "name": "power-server",
+    "image": f"oci://example/power@sha256:{PINNED_DIGEST}",
+    "provenance": "test provenance",
+    "sbom": "test sbom",
+    "tools": [
+        {
+            "tool_id": "power.format",
+            # No "mutable" field — must default to True (fail-closed: treat as
+            # write unless explicitly attested read-only).
+            "input_schema": {"type": "object"},
+            "output_schema": {"type": "object"},
+        },
+    ],
+}
+
+
+@pytest.mark.asyncio
+async def test_tool_without_explicit_mutable_field_defaults_to_mutable(
+    registry: McpRegistry, engine: AsyncEngine,
+):
+    """IMPORTANT #1: a tool registered WITHOUT an explicit ``mutable`` field
+    must be treated as MUTABLE (fail-closed default). It routes to an approval.
+    """
+    uid = uuid.uuid4()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        await session.execute(
+            text("insert into auth.users (id) values (:id) on conflict (id) do nothing"),
+            {"id": uid},
+        )
+        await session.commit()
+    tester = McpRegistryTester(registry, async_sessionmaker(engine, expire_on_commit=False), uid)
+    await tester.register(_VALID_MANIFEST_POWER_TOOL)
+
+    # The tool should be mutable even though the manifest never said "mutable".
+    reg = await registry.get_tool_registration(uid, "power.format")
+    assert reg is not None
+    assert reg["mutable"] is True, (
+        "Tool without explicit 'mutable' field must default to True "
+        "(fail-closed: treat as write unless attested read-only)"
+    )
+
+    # is_tool_mutable should also return True.
+    assert await registry.is_tool_mutable(uid, "power.format") is True

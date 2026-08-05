@@ -163,7 +163,7 @@ class McpRegistry:
                     McpToolRecord.user_id == context.user_id,
                     McpToolRecord.tool_id == tool_id,
                     McpToolRecord.enabled.is_(True),
-                ).limit(1)
+                ).order_by(McpToolRecord.created_at.asc()).limit(1)
             )
             return row is not None
 
@@ -171,7 +171,8 @@ class McpRegistry:
         """True when ``tool_id`` is a mutable MCP tool for the user.
 
         Used by the broker (service-scoped session) during per-call approval
-        re-check (NEW #7).
+        re-check (NEW #7).  Deterministic ordering (created_at) so a tool-id
+        collision cannot flip the approval decision by row order.
         """
         async with service_session(self._session_factory) as session:
             row = await session.scalar(
@@ -179,7 +180,7 @@ class McpRegistry:
                     McpToolRecord.user_id == user_id,
                     McpToolRecord.tool_id == tool_id,
                     McpToolRecord.enabled.is_(True),
-                ).limit(1)
+                ).order_by(McpToolRecord.created_at.asc()).limit(1)
             )
             return bool(row)
 
@@ -197,7 +198,7 @@ class McpRegistry:
                     McpToolRecord.user_id == user_id,
                     McpToolRecord.tool_id == tool_id,
                     McpToolRecord.enabled.is_(True),
-                ).limit(1)
+                ).order_by(McpToolRecord.created_at.asc()).limit(1)
             )
             if row is None:
                 return None

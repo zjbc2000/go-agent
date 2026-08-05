@@ -393,7 +393,7 @@ class ToolBroker:
             )
 
         # 2. Execute via the injectable MCP executor (real or fake).
-        result = await self._mcp_executor.execute(tool_id, input)  # type: ignore[union-attr]
+        result = await self._mcp_executor.execute(tool_id, input, registration)  # type: ignore[union-attr]
 
         # 3. Validate untrusted output against the registered schema.
         if result.success and self._mcp_validator is not None:

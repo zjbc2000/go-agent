@@ -48,15 +48,21 @@ class McpClient:
         self._grant_token = grant_token
 
     def invoke(
-        self, server: str, tool: str, input: dict[str, Any], grant: str
+        self, server: str, tool: str, input: dict[str, Any], grant: str,
+        *, step_id: str | None = None,
     ) -> ToolResult:
         """Invoke ``tool`` on ``server`` with ``input``, authenticated by the grant.
+
+        ``step_id`` MUST be the plan step id (the id the grant was signed over).
+        When not provided, defaults to ``tool`` — compatible with plans where
+        the step id equals the tool name (IMPORTANT #2).
 
         Raises ``ApiError("MCP_TOOL_DISABLED", ...)`` when the tool is
         DISABLED (the plan's verbatim test).
         """
+        real_step_id = step_id if step_id is not None else tool
         body = json.dumps(
-            {"step_id": tool, "tool_id": tool, "input": input}
+            {"step_id": real_step_id, "tool_id": tool, "input": input}
         ).encode("utf-8")
         req = Request(
             self._broker_url,

@@ -33,6 +33,25 @@ const RUN_FAILED = (seq: number, messageId: string, code: string, message: strin
     error: { code, message },
   })}\n\n`;
 
+const DOCUMENT_DRAFT = (
+  seq: number,
+  messageId: string,
+  approvalId: string,
+  sessionId: string,
+  type: string,
+  title: string,
+  body: string,
+) =>
+  `id: ${seq}\nevent: document.draft\ndata: ${JSON.stringify({
+    approvalId,
+    sessionId,
+    messageId,
+    type,
+    title,
+    body,
+    createdAt: "2026-08-06T00:00:00.000Z",
+  })}\n\n`;
+
 describe("RealChatRepository (run-first)", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -209,5 +228,72 @@ describe("RealChatRepository (run-first)", () => {
 
     expect(fetchMock).toHaveBeenCalledWith("/api/v1/internal/v1/runs/run-1/events");
     expect(snapshot).toEqual({ runId: "run-1", status: "completed", content: "Hello" });
+  });
+
+  it("maps document.draft SSE to a pending-confirmation PlanDraft", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse(
+        RUN_STARTED(1, "msg-1", "run-1") +
+          DELTA(2, "msg-1", "我对") +
+          DOCUMENT_DRAFT(3, "msg-1", "app-1", "sess-1", "interest", "学习摄影", "目标：构图"),
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = await createRealChatRepository().createRun("sess-1", "我想学摄影", "req-1");
+    const events: unknown[] = [];
+    for await (const event of run.events) events.push(event);
+
+    expect(events).toEqual([
+      { type: "message-start", messageId: "msg-1" },
+      { type: "token", messageId: "msg-1", text: "我对" },
+      {
+        type: "draft",
+        draft: {
+          id: "app-1",
+          sessionId: "sess-1",
+          messageId: "msg-1",
+          title: "学习摄影",
+          content: "目标：构图",
+          category: "interest",
+          status: "pending_confirmation",
+          createdAt: "2026-08-06T00:00:00.000Z",
+        },
+      },
+    ]);
+  });
+
+  it("treats a draft-terminated stream as settled (no reconnect, no throw)", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse(RUN_STARTED(1, "msg-1", "run-1") + DOCUMENT_DRAFT(2, "msg-1", "app-1", "sess-1", "task", "计划", "内容")),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const run = await createRealChatRepository().createRun("sess-1", "帮我规划", "req-1");
+    const events: unknown[] = [];
+    for await (const event of run.events) events.push(event);
+
+    // No "stream ended without terminal event" throw, and no reconnect (single POST).
+    expect(events.some((e) => (e as ChatEvent).type === "draft")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("subscribeRunEvents replay ending in document.draft terminates cleanly", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      sseResponse(DOCUMENT_DRAFT(3, "msg-1", "app-1", "sess-1", "interest", "标题", "正文")),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stream = createRealChatRepository().subscribeRunEvents({
+      sessionId: "sess-1",
+      content: "x",
+      idempotencyKey: "req-1",
+      lastEventId: "2",
+    });
+    const events: unknown[] = [];
+    for await (const event of stream.events) events.push(event);
+
+    expect(events.some((e) => (e as ChatEvent).type === "draft")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
   });
 });

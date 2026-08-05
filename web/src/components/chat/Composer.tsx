@@ -108,6 +108,14 @@ export function Composer() {
 
         case "draft":
           addDraft(event.draft);
+          // A draft ends the assistant stream (no run.completed follows): mark the
+          // explanation bubble completed so it doesn't stay in "streaming".
+          setChatStatus("completed");
+          useChatStore.setState((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === event.draft.messageId ? { ...m, status: "completed" as const } : m,
+            ),
+          }));
           break;
 
         case "done":

@@ -61,6 +61,7 @@ export interface ChatRepository {
   getRun(runId: string): Promise<RunSnapshot | null>;
 
   createSession(): Promise<Session>;
+  deleteSession(sessionId: string): Promise<void>;
 }
 
 // --- Planning ---
@@ -74,6 +75,7 @@ export interface PlanningRepository {
   decideApproval(input: ApprovalDecisionInput): Promise<ApprovalResult>;
   listVersions(documentId: string): Promise<DocumentVersion[]>;
   restoreVersion(documentId: string, versionId: string): Promise<void>;
+  deleteDocument(documentId: string): Promise<void>;
 
   /**
    * Request a skill execution. Write/delete skills return a pending execution

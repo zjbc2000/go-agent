@@ -189,5 +189,10 @@ export function createMockChatRepository(): ChatRepository {
       messages[session.id] = [];
       return session;
     },
+
+    async deleteSession(sessionId: string): Promise<void> {
+      sessions = sessions.filter((s) => s.id !== sessionId);
+      delete messages[sessionId];
+    },
   };
 }

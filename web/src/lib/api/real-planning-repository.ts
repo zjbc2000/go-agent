@@ -198,6 +198,11 @@ export function createRealPlanningRepository(): PlanningRepository {
       if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
     },
 
+    async deleteDocument(documentId: string): Promise<void> {
+      const res = await fetch(`${PLANNING_API}/documents/${documentId}`, { method: "DELETE" });
+      if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
+    },
+
     async requestExecution(
       documentId: string,
       inputs: Record<string, unknown>,

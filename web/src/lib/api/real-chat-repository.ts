@@ -66,7 +66,17 @@ function parseSseFrame(frame: string): SseFrame | null {
 
 function toChatEvent(frame: SseFrame): ChatEvent | null {
   if (!frame.data) return null;
-  let payload: { messageId?: string; text?: string; error?: { code?: string; message?: string } };
+  let payload: Record<string, unknown> & {
+    messageId?: string;
+    text?: string;
+    error?: { code?: string; message?: string };
+    approvalId?: string;
+    sessionId?: string;
+    type?: string;
+    title?: string;
+    body?: string;
+    createdAt?: string;
+  };
   try {
     payload = JSON.parse(frame.data);
   } catch {
@@ -78,6 +88,20 @@ function toChatEvent(frame: SseFrame): ChatEvent | null {
       return { type: "message-start", messageId: payload.messageId ?? "" };
     case "message.delta":
       return { type: "token", messageId: payload.messageId ?? "", text: payload.text ?? "" };
+    case "document.draft":
+      return {
+        type: "draft",
+        draft: {
+          id: payload.approvalId ?? "",
+          sessionId: payload.sessionId ?? "",
+          messageId: payload.messageId ?? "",
+          title: payload.title ?? "",
+          content: payload.body ?? "",
+          category: (payload.type as "memory" | "interest" | "task" | "skill") ?? "interest",
+          status: "pending_confirmation",
+          createdAt: payload.createdAt ?? new Date().toISOString(),
+        },
+      };
     case "run.completed":
       return { type: "done", messageId: payload.messageId ?? "" };
     case "run.failed":
@@ -148,7 +172,8 @@ function streamRun(
           if (parsed.id) cursor = parsed.id;
           const chatEvent = toChatEvent(parsed);
           if (!chatEvent) continue;
-          if (chatEvent.type === "done" || chatEvent.type === "error") terminal = true;
+          if (chatEvent.type === "done" || chatEvent.type === "error" || chatEvent.type === "draft")
+            terminal = true;
           yield chatEvent;
         }
       }
@@ -244,7 +269,8 @@ function openRunStream(path: string, body: string, signal: AbortSignal | undefin
               }
               const chatEvent = toChatEvent(parsed);
               if (!chatEvent) continue;
-              if (chatEvent.type === "done" || chatEvent.type === "error") terminal = true;
+              if (chatEvent.type === "done" || chatEvent.type === "error" || chatEvent.type === "draft")
+            terminal = true;
               push(chatEvent);
             }
           }
@@ -373,7 +399,25 @@ export function createRealChatRepository(): ChatRepository {
     },
 
     async createSession(): Promise<Session> {
-      throw new Error("createSession is not implemented yet; use a seeded session");
+      const res = await fetch(`${CHAT_API}/sessions`, { method: "POST" });
+      if (!res.ok) throw new Error("Failed to create session");
+      const row = (await res.json()) as {
+        id: string;
+        title: string;
+        createdAt: string;
+        lastMessageAt: string;
+      };
+      return {
+        id: row.id,
+        title: row.title,
+        createdAt: row.createdAt,
+        lastMessageAt: row.lastMessageAt,
+      };
+    },
+
+    async deleteSession(sessionId: string): Promise<void> {
+      const res = await fetch(`${CHAT_API}/sessions/${sessionId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Failed to delete session");
     },
   };
 }

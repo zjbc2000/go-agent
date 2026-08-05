@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import cast
 
 from app.core.context import RequestContext
@@ -100,6 +100,33 @@ class ExecutionRepository:
                 updated_at=created_at,
             )
             session.add(row)
+            await session.flush()
+            return self._to_approval(row)
+
+    async def expire_latest_pending_approval(
+        self, context: RequestContext
+    ) -> ExecutionApproval | None:
+        """Backdate the caller's newest pending execution approval (test mode only).
+
+        User-scoped (RLS): only the caller's own approvals are visible, so a caller
+        with no pending approval -- and any cross-user caller -- sees None and the
+        test endpoint surfaces 404. Returns the expired approval for the response.
+        """
+        now = _utcnow()
+        async with user_scoped_session(self._session_factory, context) as session:
+            row = await session.scalar(
+                select(ExecutionApprovalRecord)
+                .where(
+                    ExecutionApprovalRecord.user_id == context.user_id,
+                    ExecutionApprovalRecord.status == "pending",
+                )
+                .order_by(ExecutionApprovalRecord.created_at.desc())
+                .limit(1)
+            )
+            if row is None:
+                return None
+            row.expires_at = now - timedelta(minutes=1)
+            row.updated_at = now
             await session.flush()
             return self._to_approval(row)
 

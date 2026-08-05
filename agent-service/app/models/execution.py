@@ -161,7 +161,9 @@ class McpTool(Base):
     server_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     tool_id: Mapped[str] = mapped_column(String(200), nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
-    mutable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    # Fail-closed default (matches the Pydantic schema + migration 011): a tool is
+    # a WRITE (approval-gated) unless the manifest explicitly attests mutable: false.
+    mutable: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True)
     input_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     output_schema: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)

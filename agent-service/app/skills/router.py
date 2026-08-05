@@ -19,9 +19,55 @@ from app.skills.service import SkillService
 
 router = APIRouter()
 
+_VALID_DECISIONS = ("approve", "reject", "regenerate")
+
 
 def get_skill_service(request: Request) -> SkillService:
     return request.app.state.skill_service
+
+
+@router.post("/internal/v1/skills/approvals/{approval_id}/decisions")
+async def decide_execution_approval(
+    approval_id: UUID,
+    request: Request,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    service: SkillService = Depends(get_skill_service),
+) -> dict:
+    """Confirm a pending execution approval and queue its sandbox run.
+
+    The decision vocabulary matches the planning approvals (approve/reject/
+    regenerate) but the execution service only supports ``approve`` in this MVP:
+    a rejected/regenerated execution approval has no backend path yet. Expired
+    approvals surface APPROVAL_EXPIRED (409) and a repeated idempotency_key
+    returns the same run.
+    """
+    try:
+        body = await request.json()
+    except ValueError:
+        raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False) from None
+    if not isinstance(body, dict):
+        raise ApiError("VALIDATION_FAILED", "Request body must be an object.", False)
+    decision = body.get("decision")
+    idempotency_key = body.get("idempotency_key")
+    if decision not in _VALID_DECISIONS:
+        raise ApiError(
+            "VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False
+        )
+    if decision != "approve":
+        raise ApiError("VALIDATION_FAILED", "Only approve is supported for execution approvals.", False)
+    if not isinstance(idempotency_key, str) or not idempotency_key.strip():
+        raise ApiError("VALIDATION_FAILED", "idempotency_key is required.", False)
+
+    run = await service.confirm_execution(context, approval_id, idempotency_key)
+    return {
+        "decision": "confirmed",
+        "run": {
+            "id": str(run.id),
+            "status": run.status,
+            "planHash": run.plan_hash,
+        },
+    }
 
 
 @router.post("/internal/v1/skills/{document_id}/executions")

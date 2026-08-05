@@ -7,13 +7,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from datetime import timedelta
 
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.chat.deps import get_request_context, require_internal_token
 from app.chat.provider import build_provider
 from app.chat.router import router as chat_router
 from app.chat.service import ChatService
 from app.core.config import Settings
+from app.core.context import RequestContext
 from app.core.crypto import LocalEnvelopeCipher
 from app.core.errors import ApiError, api_error_handler
 from app.execution.grant import GrantVerifier
@@ -72,6 +74,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         chat=service,
     )
     execution_repository = ExecutionRepository(session_factory=session_factory, cipher=cipher)
+    app.state.execution_repository = execution_repository
     mcp_registry = McpRegistry(session_factory=session_factory)
     mcp_validator = McpValidator()
     skill_service = SkillService(
@@ -142,6 +145,31 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         result = await tool_broker.invoke(grant_token, step_id, tool_id, input_data)
         return {"data": result.data} if result.success else {
             "error": {"code": result.error_code, "message": result.error_message}
+        }
+
+    # --- TEST-ONLY endpoint (Task 5 E2E) ---
+    #
+    # Backdates the caller's newest pending execution approval so the UI can prove
+    # an expired decision never queues a run. Gated by AGENT_TEST_MODE=true:
+    # production never sets the flag, so this route raises AUTHZ_DENIED there.
+
+    @app.post("/internal/v1/test/expire-latest-approval")
+    async def test_expire_latest_approval(
+        request: Request,
+        _: None = Depends(require_internal_token),
+        context: RequestContext = Depends(get_request_context),
+    ) -> dict:
+        settings: Settings = request.app.state.settings
+        if not settings.test_mode:
+            raise ApiError("AUTHZ_DENIED", "Test endpoints are disabled outside AGENT_TEST_MODE.", False)
+        repository: ExecutionRepository = request.app.state.execution_repository
+        approval = await repository.expire_latest_pending_approval(context)
+        if approval is None:
+            raise ApiError("NOT_FOUND", "No pending execution approval to expire.", False)
+        return {
+            "approvalId": str(approval.id),
+            "status": approval.status,
+            "expiresAt": approval.expires_at.isoformat(),
         }
 
     return app

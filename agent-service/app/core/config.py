@@ -47,6 +47,9 @@ class Settings:
     outbox_poller_enabled: bool = True
     # Sandbox tool-grant shared secret (Task 3).
     tool_grant_secret: str = DEV_TOOL_GRANT_SECRET
+    # TEST-ONLY endpoints (Task 5 E2E). Never true in production; a test route
+    # behind this flag returns AUTHZ_DENIED when it is off.
+    test_mode: bool = False
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -68,4 +71,5 @@ class Settings:
             outbox_backoff_cap_seconds=int(os.getenv("OUTBOX_BACKOFF_CAP_SECONDS", "600")),
             outbox_poller_enabled=os.getenv("OUTBOX_POLLER_ENABLED", "true").lower() != "false",
             tool_grant_secret=os.getenv("AGENT_TOOL_GRANT_SECRET", DEV_TOOL_GRANT_SECRET),
+            test_mode=os.getenv("AGENT_TEST_MODE", "false").lower() == "true",
         )

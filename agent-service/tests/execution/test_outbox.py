@@ -73,6 +73,7 @@ async def test_confirm_expired_approval_is_rejected(service, user_context, appro
     with pytest.raises(ApiError) as excinfo:
         await service.confirm_execution(user_context, approval.id, "confirm-expired")
     assert excinfo.value.code == "APPROVAL_EXPIRED"
+    assert excinfo.value.retryable is False
 
 
 async def test_confirm_another_users_approval_is_not_found(service, repository, user_a, user_b):

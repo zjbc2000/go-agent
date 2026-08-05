@@ -201,7 +201,7 @@ class ExecutionRepository:
                 raise ApiError("NOT_FOUND", "Execution approval not found.", False)
             if approval.status == "pending":
                 if approval.expires_at is not None and approval.expires_at <= created_at:
-                    raise ApiError("APPROVAL_EXPIRED", "Execution approval has expired.", True)
+                    raise ApiError("APPROVAL_EXPIRED", "Execution approval has expired.", False)
                 approval.status = "confirmed"
                 approval.decision = "confirmed"
                 approval.resolved_by = context.user_id

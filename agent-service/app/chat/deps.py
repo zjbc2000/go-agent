@@ -6,6 +6,7 @@ The user-JWT dependency is injectable so tests run without a live Supabase stack
 
 from __future__ import annotations
 
+import secrets
 from typing import TYPE_CHECKING
 
 from fastapi import Depends, Header, Request
@@ -32,7 +33,7 @@ def require_internal_token(
     x_internal_token: str | None = Header(None),
 ) -> None:
     """Require the shared BFF<->service token. The browser never sees this header."""
-    if x_internal_token != settings.internal_token:
+    if x_internal_token is None or not secrets.compare_digest(x_internal_token, settings.internal_token):
         raise ApiError("AUTH_REQUIRED", "Invalid internal token.", False)
 
 

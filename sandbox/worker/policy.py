@@ -6,6 +6,9 @@ ranges, link-local, and the 169.254.169.254 cloud metadata endpoint.
 The broker is the sandbox's ONLY external channel, so this policy is the
 application-level egress guard; the container-level network policy (iptables/
 nftables) adds a second layer at the OCI boundary.
+
+IPv4-mapped-IPv6 addresses (::ffff:x.x.x.x) are checked: a mapped address whose
+embedded v4 is non-global is rejected.
 """
 
 from __future__ import annotations
@@ -26,6 +29,7 @@ class PolicyDenied(Exception):
 
 # Address ranges that must never be reachable from a sandbox container.
 _NON_GLOBAL_NETS = [
+    # IPv4
     ipaddress.IPv4Network("127.0.0.0/8"),       # loopback
     ipaddress.IPv4Network("10.0.0.0/8"),         # private
     ipaddress.IPv4Network("172.16.0.0/12"),      # private
@@ -40,18 +44,35 @@ _NON_GLOBAL_NETS = [
     ipaddress.IPv4Network("203.0.113.0/24"),     # TEST-NET-3
     ipaddress.IPv4Network("224.0.0.0/4"),        # multicast
     ipaddress.IPv4Network("240.0.0.0/4"),        # reserved
+    # IPv6
     ipaddress.IPv6Network("::1/128"),             # loopback
+    ipaddress.IPv6Network("::/128"),              # unspecified
     ipaddress.IPv6Network("fe80::/10"),           # link-local
     ipaddress.IPv6Network("fc00::/7"),            # unique local
+    ipaddress.IPv6Network("2001:db8::/32"),       # documentation
+    ipaddress.IPv6Network("2001:10::/28"),        # deprecated (ORCHID)
+    # IPv4-mapped-IPv6: the IPv4 address embedded in ::ffff:x.x.x.x is checked
+    # separately via ipv4_mapped below; listing ::ffff:0:0/96 here would reject
+    # ALL mapped addresses including public ones, so we check per-address.
 ]
 
 
 def _is_global(addr: str) -> bool:
-    """True when an address is globally routable (not loopback/private/link-local)."""
+    """True when an address is globally routable (not loopback/private/link-local).
+
+    IPv4-mapped-IPv6 addresses (``::ffff:x.x.x.x``) have their embedded IPv4
+    portion checked — a mapped private v4 is non-global.
+    """
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
+
+    # IPv4-mapped-IPv6: extract the embedded IPv4 address and check that.
+    # ipaddress represents these as IPv6Address with ipv4_mapped not None.
+    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
+        return _is_global(str(ip.ipv4_mapped))
+
     for net in _NON_GLOBAL_NETS:
         if ip in net:
             return False
@@ -68,7 +89,6 @@ def _resolve_all(hostname: str) -> list[str]:
         infos = socket.getaddrinfo(hostname, None, proto=socket.IPPROTO_TCP)
     except socket.gaierror:
         raise PolicyDenied("SANDBOX_NETWORK_DENIED", "Cannot resolve target hostname.")
-    # getaddrinfo returns (family, type, proto, canonname, sockaddr); sockaddr[0] is the IP.
     addresses: list[str] = []
     seen: set[str] = set()
     for info in infos:
@@ -99,9 +119,10 @@ class SandboxPolicy:
         if not hostname:
             raise PolicyDenied("SANDBOX_NETWORK_DENIED", "URL has no hostname.")
 
-        # Check the raw hostname for IP literals (e.g. http://127.0.0.1/).
+        # Check the raw hostname for IP literals including IPv6 bracket notation
+        # (e.g. http://[::ffff:127.0.0.1]/).
         try:
-            _ip = ipaddress.ip_address(hostname)
+            ipaddress.ip_address(hostname)
             if not _is_global(hostname):
                 raise PolicyDenied("SANDBOX_NETWORK_DENIED", "Target address is not public.")
             return

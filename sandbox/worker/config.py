@@ -15,6 +15,7 @@ from app.core.config import DEV_CRYPTO_KEY, DEV_DATABASE_URL
 
 DEV_RABBITMQ_URL = "amqp://guest:guest@127.0.0.1:5672/"
 DEV_TOOL_GRANT_SECRET = "dev-tool-grant-secret"
+DEV_SANDBOX_RUNTIME = "stub"
 
 
 @dataclass(frozen=True)
@@ -23,6 +24,8 @@ class WorkerConfig:
     rabbitmq_url: str
     crypto_key_b64: str
     tool_grant_secret: str
+    sandbox_runtime: str  # "stub" or "container"
+    broker_url: str = "http://localhost:8000"
     outbox_queue: str = "sandbox.execute"
 
     @classmethod
@@ -32,6 +35,8 @@ class WorkerConfig:
             rabbitmq_url=os.getenv("RABBITMQ_URL", DEV_RABBITMQ_URL),
             crypto_key_b64=os.getenv("AGENT_CRYPTO_KEY", DEV_CRYPTO_KEY),
             tool_grant_secret=os.getenv("AGENT_TOOL_GRANT_SECRET", DEV_TOOL_GRANT_SECRET),
+            sandbox_runtime=os.getenv("SANDBOX_RUNTIME", DEV_SANDBOX_RUNTIME),
+            broker_url=os.getenv("AGENT_TOOL_BROKER_URL", "http://localhost:8000"),
             outbox_queue=os.getenv("OUTBOX_QUEUE", "sandbox.execute"),
         )
 

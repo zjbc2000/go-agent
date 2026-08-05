@@ -91,7 +91,10 @@ class GrantVerifier:
         if not isinstance(raw["step_ids"], list):
             raise GrantInvalid("SANDBOX_GRANT_INVALID", "Grant step_ids must be a list.")
 
-        exp = int(raw["exp"])
+        try:
+            exp = int(raw["exp"])
+        except (ValueError, TypeError):
+            raise GrantInvalid("SANDBOX_GRANT_INVALID", "Grant expiry is not a valid integer.") from None
         if time.time() > exp:
             raise GrantInvalid("SANDBOX_GRANT_INVALID", "Grant has expired.")
 

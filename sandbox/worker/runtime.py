@@ -13,6 +13,9 @@ limits — behind an injectable ``ContainerRunner`` for deterministic tests.
 
 Before execution the runtime verifies the re-derived plan hash against the
 grant's ``plan_hash`` (T2 M2 fix) to refuse a drifted plan.
+
+The grant token is passed via the AGENT_TOOL_GRANT_TOKEN env var, never on the
+command line (Minor #6 — cmdline is readable via /proc/<pid>/cmdline).
 """
 
 from __future__ import annotations
@@ -22,6 +25,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from app.execution.grant import GrantSigner as AgentGrantSigner
 from app.skills.schemas import ExecutionPlan
 
 from worker.audit import MemoryAuditStore
@@ -70,25 +74,15 @@ class ContainerResult:
 
 
 @dataclass(frozen=True)
-class ToolGrant:
-    """A signed, expiring grant that the sandbox container presents to the broker."""
-
-    token: str
-    run_id: str
-    user_id: str
-    plan_hash: str
-    expires_at: str
-    step_ids: list[str]
-
-
-@dataclass(frozen=True)
 class ExecutionResult:
     run_id: str
     status: str
 
 
 class Runtime(Protocol):
-    def execute(self, plan: ExecutionPlan, sandbox_run_id: str) -> None: ...
+    """The sandbox execution seam: takes a plan and producing terminal status."""
+
+    def execute(self, plan: ExecutionPlan, sandbox_run_id: str, user_id: str) -> None: ...
 
 
 class StubRuntime:
@@ -97,18 +91,23 @@ class StubRuntime:
     def __init__(self, audit: MemoryAuditStore | None = None) -> None:
         self._audit = audit or MemoryAuditStore()
 
-    def execute(self, plan: ExecutionPlan, sandbox_run_id: str) -> None:
+    def execute(self, plan: ExecutionPlan, sandbox_run_id: str, user_id: str = "") -> None:
         for step in plan.steps:
             self._audit.record(sandbox_run_id, step.id)
 
 
 class ContainerRuntime:
-    """Real isolated runtime: builds a hardened OCI config and delegates to a runner."""
+    """Real isolated runtime: builds a hardened OCI config and delegates to a runner.
+
+    Uses the agent-service GrantSigner directly (shared type, no local protocol
+    divergence — I4). The grant token is placed in the AGENT_TOOL_GRANT_TOKEN
+    env var, never on the command line (Minor #6).
+    """
 
     def __init__(
         self,
         runner: ContainerRunner,
-        grant_signer: GrantSigner,
+        grant_signer: AgentGrantSigner,
         broker_url: str,
         image: str = "goudan-sandbox-runtime:latest",
     ) -> None:
@@ -117,37 +116,32 @@ class ContainerRuntime:
         self._broker_url = broker_url
         self._image = image
 
-    def execute(self, plan: ExecutionPlan, sandbox_run_id: str) -> None:
+    def execute(self, plan: ExecutionPlan, sandbox_run_id: str, user_id: str) -> None:
         # T2 M2 fix: verify the re-derived plan hash before launching the container.
-        # The plan's hash was computed by compile_skill from the document version +
-        # steps; if the plan has drifted (e.g. the document was edited after the
-        # run was queued), refuse to execute.
         rederived = _rehash_plan(plan)
         if rederived != plan.hash:
             raise RuntimeError(
                 f"Plan hash mismatch: stored {plan.hash!r} != re-derived {rederived!r}"
             )
 
-        grant = self._signer.sign(
+        step_ids = [step.id for step in plan.steps]
+        grant_token = self._signer.sign(
             run_id=sandbox_run_id,
-            user_id="",  # set by the signer from the repository context
+            user_id=user_id,
             plan_hash=plan.hash,
-            step_ids=[step.id for step in plan.steps],
+            step_ids=step_ids,
         )
 
         config = SandboxContainerConfig(
             image=self._image,
-            command=["/bin/goudan-runtime", "--grant", grant.token, "--broker-url", self._broker_url],
-            grant_token=grant.token,
-            environment={"AGENT_TOOL_BROKER_URL": self._broker_url},
+            command=["/bin/goudan-runtime"],
+            grant_token=grant_token,
+            environment={
+                "AGENT_TOOL_BROKER_URL": self._broker_url,
+                "AGENT_TOOL_GRANT_TOKEN": grant_token,
+            },
         )
         self._runner.run(config)
-
-
-class GrantSigner(Protocol):
-    """Port for minting a signed, expiring tool grant."""
-
-    def sign(self, *, run_id: str, user_id: str, plan_hash: str, step_ids: list[str]) -> ToolGrant: ...
 
 
 def _rehash_plan(plan: ExecutionPlan) -> str:

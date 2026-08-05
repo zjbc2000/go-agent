@@ -2,9 +2,8 @@
 
 The broker is the sandbox's ONLY external channel. ``SandboxPolicy.validate_url``
 resolves all addresses (A/AAAA/CNAME chains) and rejects any non-global target
-— loopback, private ranges, link-local, and 169.254.169.254 metadata.
-
-These are the exact parametrized tests from the Task-3 brief.
+— loopback, private ranges, link-local, 169.254.169.254 metadata, and
+IPv4-mapped-IPv6 bypass addresses (I5).
 """
 
 import pytest
@@ -17,6 +16,12 @@ from worker.policy import PolicyDenied, SandboxPolicy
         "http://127.0.0.1",
         "http://169.254.169.254",
         "http://10.0.0.1",
+        # I5: IPv4-mapped-IPv6 bypass cases
+        "http://[::ffff:127.0.0.1]",
+        "http://[::ffff:169.254.169.254]",
+        "http://[::ffff:10.0.0.1]",
+        "http://[::ffff:192.168.1.1]",
+        "http://[::ffff:10.0.0.1]",
     ],
 )
 def test_network_policy_rejects_non_public_targets(url: str):
@@ -38,10 +43,7 @@ def test_private_ip_ranges_rejected():
 
 
 def test_public_urls_pass():
-    """Well-known public addresses should pass validation (no DNS needed for these).
-    These are IP literals that are globally routable.
-    """
-    # 8.8.8.8 (Google DNS) and 1.1.1.1 (Cloudflare DNS) are globally routable.
+    """Well-known public addresses should pass validation (no DNS needed for these)."""
     SandboxPolicy().validate_url("http://8.8.8.8")
     SandboxPolicy().validate_url("http://1.1.1.1")
 

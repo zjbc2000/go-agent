@@ -131,6 +131,7 @@ class SandboxToolCall(Base):
     step_id: Mapped[str] = mapped_column(Text, nullable=False)
     tool_id: Mapped[str] = mapped_column(Text, nullable=False)
     result_status: Mapped[str] = mapped_column(Text, nullable=False)
+    result_ciphertext: Mapped[str | None] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
 

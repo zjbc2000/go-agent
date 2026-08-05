@@ -9,9 +9,9 @@ twice. A crash or duplicate delivery can therefore never produce duplicate step
 writes.
 
 Task 3 extends the executor: ``claim`` is now a lease (stale running rows are
-re-claimable, I1), the stub runtime is swapped for the isolated Docker runtime,
-and a signed tool grant is minted for each run so the sandbox container can call
-the broker.
+re-claimable, I1), the stub runtime is swapped for the isolated Docker runtime
+when ``SANDBOX_RUNTIME=container``, and the claimed user_id is passed through
+so the ContainerRuntime can mint a grant with the real user.
 """
 
 from __future__ import annotations
@@ -38,7 +38,7 @@ class SandboxExecutor:
         if claimed is None:
             return
         try:
-            self._runtime.execute(claimed.plan, claimed.id)
+            self._runtime.execute(claimed.plan, claimed.id, str(claimed.user_id))
         except Exception:
             logger.exception("Sandbox run %s failed", sandbox_run_id)
             self._repository.finish(sandbox_run_id, status="failed", error_code="SANDBOX_ERROR")

@@ -87,7 +87,10 @@ class WorkerRepository:
                         (SandboxRunRecord.status == "queued")
                         | (
                             (SandboxRunRecord.status == "running")
-                            & (SandboxRunRecord.claimed_at < stale_threshold)
+                            & (
+                                (SandboxRunRecord.claimed_at.is_(None))
+                                | (SandboxRunRecord.claimed_at < stale_threshold)
+                            )
                         )
                     ),
                 )

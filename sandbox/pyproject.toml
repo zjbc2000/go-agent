@@ -1,0 +1,41 @@
+[project]
+name = "sandbox"
+version = "0.1.0"
+description = "Celery worker that executes immutable skill plans (Task 2: in-process stub runtime)"
+requires-python = ">=3.11"
+dependencies = [
+    "agent-service",
+    "celery>=5.4",
+    "sqlalchemy>=2",
+    "psycopg[binary]>=3.2",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "pytest-asyncio>=0.24",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["app"]
+
+[tool.uv.sources]
+agent-service = { path = "../agent-service", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+src = ["app", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]

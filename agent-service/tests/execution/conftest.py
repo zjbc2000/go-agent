@@ -19,6 +19,7 @@ from app.core.config import Settings
 from app.core.context import RequestContext, UserRole, new_request_id
 from app.core.crypto import LocalEnvelopeCipher
 from app.core.errors import ApiError
+from app.execution.outbox import OutboxRepository
 from app.main import create_app
 from app.repositories.execution import ExecutionRepository
 from app.repositories.planning import DocumentRepository
@@ -129,6 +130,20 @@ def service(
     return SkillService(documents=repository, execution=execution_repository, cipher=cipher)
 
 
+@pytest.fixture
+def outbox(engine: AsyncEngine) -> OutboxRepository:
+    """A read handle on the outbox, acting as the system (service role)."""
+    return OutboxRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False))
+
+
+@pytest.fixture
+async def approval(service: SkillService, user_context: RequestContext, active_skill: uuid.UUID):
+    """A pending execution approval for a write skill owned by the default user."""
+    result = await service.request_execution(user_context, active_skill, {"title": "x"}, "req-key")
+    assert result.approval is not None
+    return result.approval
+
+
 async def _create_skill(repository: DocumentRepository, user: RequestContext, manifest: dict) -> uuid.UUID:
     document = await repository.create_active(
         user, type="skill", title="skill", body=json.dumps(manifest)
@@ -165,7 +180,9 @@ def _fake_role_loader(user_id: uuid.UUID) -> UserRole:
 
 @pytest.fixture
 def app_settings() -> Settings:
-    return Settings(internal_token=TEST_INTERNAL_TOKEN)
+    # Disable the outbox poller so entering the TestClient never starts the
+    # RabbitMQ background task; tests drain the outbox explicitly.
+    return Settings(internal_token=TEST_INTERNAL_TOKEN, outbox_poller_enabled=False)
 
 
 @pytest.fixture

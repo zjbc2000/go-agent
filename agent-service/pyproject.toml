@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "agent-service"
 version = "0.1.0"
@@ -12,6 +16,7 @@ dependencies = [
     "pyjwt>=2.9",
     "sqlalchemy[asyncio]>=2",
     "asyncpg>=0.31.0",
+    "aio-pika>=9.4",
 ]
 
 [dependency-groups]
@@ -37,4 +42,7 @@ select = ["E", "F", "I", "UP"]
 
 [tool.mypy]
 python_version = "3.11"
+packages = ["app"]
+
+[tool.hatch.build.targets.wheel]
 packages = ["app"]

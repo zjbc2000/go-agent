@@ -31,7 +31,13 @@ class ExecutionApproval(Base):
             "status in ('pending', 'confirmed', 'rejected', 'superseded')",
             name="execution_approvals_status_check",
         ),
-        Index("execution_approvals_id_idempotency_key_idx", "id", "idempotency_key", unique=True),
+        Index(
+            "execution_approvals_document_id_idempotency_key_idx",
+            "document_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index("execution_approvals_version_id_idx", "version_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
@@ -59,7 +65,13 @@ class SandboxRun(Base):
             "status in ('queued', 'running', 'succeeded', 'failed', 'timed_out', 'policy_denied')",
             name="sandbox_runs_status_check",
         ),
-        Index("sandbox_runs_id_idempotency_key_idx", "id", "idempotency_key", unique=True),
+        Index(
+            "sandbox_runs_document_id_idempotency_key_idx",
+            "document_id",
+            "idempotency_key",
+            unique=True,
+        ),
+        Index("sandbox_runs_version_id_idx", "version_id"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

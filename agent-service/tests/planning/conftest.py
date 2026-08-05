@@ -143,7 +143,9 @@ def _fake_role_loader(user_id: uuid.UUID) -> UserRole:
 
 @pytest.fixture
 def app_settings() -> Settings:
-    return Settings(internal_token=TEST_INTERNAL_TOKEN)
+    # Disable the outbox poller so entering the TestClient never starts the
+    # RabbitMQ background task during unrelated suites.
+    return Settings(internal_token=TEST_INTERNAL_TOKEN, outbox_poller_enabled=False)
 
 
 @pytest.fixture

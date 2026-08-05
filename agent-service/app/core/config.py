@@ -17,6 +17,10 @@ DEV_INTERNAL_TOKEN = "dev-internal-token"
 # DEV-ONLY default: the local Supabase Postgres used by `supabase db reset`.
 DEV_DATABASE_URL = "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
 
+# DEV-ONLY default: the local RabbitMQ. The `goudan-rabbitmq` container serves
+# 5672/15672 on this machine; production must set RABBITMQ_URL explicitly.
+DEV_RABBITMQ_URL = "amqp://guest:guest@127.0.0.1:5672/"
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -29,6 +33,14 @@ class Settings:
     provider_api_key: str | None = None
     provider_model: str = "gpt-4o-mini"
     stream_event_retention_seconds: int = 7 * 24 * 60 * 60
+    # Transactional outbox publisher (Task 2).
+    rabbitmq_url: str = DEV_RABBITMQ_URL
+    outbox_queue: str = "sandbox.execute"
+    outbox_poll_interval_seconds: int = 5
+    outbox_max_attempts: int = 10
+    outbox_backoff_base_seconds: int = 10
+    outbox_backoff_cap_seconds: int = 600
+    outbox_poller_enabled: bool = True
 
     @classmethod
     def from_env(cls) -> "Settings":
@@ -42,4 +54,11 @@ class Settings:
             stream_event_retention_seconds=int(
                 os.getenv("AGENT_STREAM_EVENT_RETENTION_SECONDS", str(7 * 24 * 60 * 60))
             ),
+            rabbitmq_url=os.getenv("RABBITMQ_URL", DEV_RABBITMQ_URL),
+            outbox_queue=os.getenv("OUTBOX_QUEUE", "sandbox.execute"),
+            outbox_poll_interval_seconds=int(os.getenv("OUTBOX_POLL_INTERVAL_SECONDS", "5")),
+            outbox_max_attempts=int(os.getenv("OUTBOX_MAX_ATTEMPTS", "10")),
+            outbox_backoff_base_seconds=int(os.getenv("OUTBOX_BACKOFF_BASE_SECONDS", "10")),
+            outbox_backoff_cap_seconds=int(os.getenv("OUTBOX_BACKOFF_CAP_SECONDS", "600")),
+            outbox_poller_enabled=os.getenv("OUTBOX_POLLER_ENABLED", "true").lower() != "false",
         )

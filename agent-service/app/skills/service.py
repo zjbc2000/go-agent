@@ -72,6 +72,21 @@ class SkillService:
         )
         return ExecutionRequestResult(approval=None, run=run)
 
+    async def confirm_execution(
+        self, context: RequestContext, approval_id: UUID, idempotency_key: str
+    ) -> SandboxRun:
+        """Confirm a pending approval, queue its run, and emit its outbox event.
+
+        The whole confirmation is one user-scoped transaction: the approval is
+        locked FOR UPDATE, resolved (expired -> APPROVAL_EXPIRED), and the run +
+        ``sandbox.execute`` outbox row are inserted together so Celery can never
+        learn of a run that was rolled back. Idempotent under a repeated
+        ``idempotency_key`` (same run), conflict on a different key.
+        """
+        return await self._execution.confirm_execution(
+            context, approval_id, idempotency_key, created_at=_utcnow()
+        )
+
     def _compile_manifest(self, body: str, version_id: UUID, inputs: dict[str, Any]) -> ExecutionPlan:
         try:
             manifest = json.loads(body)

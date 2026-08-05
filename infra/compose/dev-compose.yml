@@ -1,0 +1,68 @@
+# Dev wiring for the skill-sandbox pipeline: RabbitMQ, agent, Celery worker, and
+# the (future) sandbox runtime container.
+#
+# RabbitMQ choice (documented per the Task-2 dispatch ruling): this MVP wires the
+# agent-service publisher and the Celery worker to the long-lived `goudan-rabbitmq`
+# container already running on 127.0.0.1:5672 (management 15672), so tests target
+# `amqp://guest:guest@127.0.0.1:5672` with no local stack needed. The `rabbitmq`
+# service below therefore maps to NON-colliding host ports (5673/15673) so
+# `docker compose up -d rabbitmq` never clashes with the existing container; to run
+# the full local stack against this compose broker instead, set RABBITMQ_URL to
+# amqp://guest:guest@host.docker.internal:5673.
+#
+# Only the `rabbitmq` service is required for the Task-2 verification gates. The
+# agent/celery/sandbox-runtime services are wired for the later tasks and sit under
+# the `full` profile so a bare `docker compose up -d rabbitmq` starts only the
+# broker; their images/Dockerfiles land in Task 3.
+
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: goudan-dev-rabbitmq
+    ports:
+      - "5673:5672"
+      - "15673:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  agent:
+    # TODO(Task 3): real agent-service Dockerfile; placeholder image for wiring.
+    image: python:3.11-slim
+    profiles: ["full"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@host.docker.internal:54322/postgres
+      RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
+      AGENT_INTERNAL_TOKEN: dev-internal-token
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  celery-worker:
+    # TODO(Task 3): real sandbox Dockerfile; placeholder image for wiring.
+    image: python:3.11-slim
+    profiles: ["full"]
+    # PYTHONPATH must lead with the sandbox root so `app` resolves to the worker
+    # package (which merges the agent-service `app` submodules it reuses) instead
+    # of the standalone agent-service `app` on the editable-install path.
+    working_dir: /app
+    environment:
+      PYTHONPATH: /app
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@host.docker.internal:54322/postgres
+      RABBITMQ_URL: amqp://guest:guest@host.docker.internal:5672
+    command: ["celery", "-A", "app.celery_app", "worker", "--loglevel=info"]
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  sandbox-runtime:
+    # TODO(Task 3): the isolated OCI runtime image with the worker launch path.
+    image: alpine:3.20
+    profiles: ["full"]
+    command: ["sleep", "infinity"]

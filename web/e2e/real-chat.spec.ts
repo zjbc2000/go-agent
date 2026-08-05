@@ -1,11 +1,16 @@
 import { expect, test } from "@playwright/test";
 import { E2E_SESSION_ID, E2E_USER, login } from "./support/auth";
-import { cleanSession } from "./support/setup";
+import { cleanSession, ensureSession } from "./support/setup";
 
+// The seed user's id (supabase/seed.sql).
+const E2E_USER_ID = "11111111-1111-4111-8111-111111111111";
 const FULL_REPLY = "Hello from the Goudan agent!";
 
 test.describe("real chat streaming (BFF -> agent-service)", () => {
   test.beforeEach(async ({ request }) => {
+    // agent-service pytest runs truncate the chat tables, which deletes the seeded
+    // session; re-ensure it so the test is self-sufficient, then start clean.
+    await ensureSession(request, E2E_SESSION_ID, E2E_USER_ID);
     await cleanSession(request, E2E_SESSION_ID);
   });
 

@@ -5,14 +5,21 @@ fake JWT verifier, so no network calls are made. Streaming is exercised via
 ``TestClient.stream``; ending the stream early simulates a client disconnect.
 """
 
+import asyncio
 import uuid
+from datetime import timedelta
 
+from app.chat.provider import DeterministicProvider
+from app.chat.service import ChatService
 from sqlalchemy import text
 
 from conftest import _iter_sse, _parse_sse
 
 # Must match the deterministic provider's default text in app/chat/provider.py.
 FAKE_PROVIDER_TEXT = "Hello from the Goudan agent!"
+# How many message.delta events a single generation persists: the default provider
+# emits the text in chunks of 8, so this is len(text) // 8 rounded up.
+GENERATION_DELTA_COUNT = 4
 
 
 async def test_create_run_requires_internal_token(client, owned_session, user_context):
@@ -139,3 +146,67 @@ async def test_reconnect_resumes_run_without_second_user_message(
     # Exactly one user message is persisted across both connections.
     user_count = (await db_session.execute(text("select count(*) from messages where role = 'user'"))).scalar()
     assert user_count == 1
+
+
+async def test_concurrent_same_key_streams_persist_single_generation(
+    chat_repository, user_context, owned_session, db_session
+):
+    """Two overlapping same-key stream_run calls must never double-generate.
+
+    Both consumers start on the same queued run; at most one may own generation, so
+    the persisted stream holds exactly one ``run.started`` and one set of deltas.
+    """
+    service = ChatService(chat_repository, DeterministicProvider(), timedelta(days=7))
+    created = await service.create_run(user_context, owned_session, "race", "race-key")
+    run_id = created.run_id
+
+    async def consume(agen):
+        return [e async for e in agen]
+
+    await asyncio.gather(
+        consume(service.stream_run(user_context, run_id, 0)),
+        consume(service.stream_run(user_context, run_id, 0)),
+    )
+
+    rows = (
+        await db_session.execute(
+            text("select kind from stream_events where run_id = :rid order by sequence"),
+            {"rid": run_id},
+        )
+    ).all()
+    kinds = [row[0] for row in rows]
+    assert kinds.count("run.started") == 1
+    assert kinds.count("message.delta") == GENERATION_DELTA_COUNT
+    assert kinds.count("run.completed") == 1
+    assert kinds[0] == "run.started" and kinds[-1] == "run.completed"
+
+    status = await db_session.scalar(
+        text("select status from messages where run_id = :rid and role = 'assistant'"),
+        {"rid": run_id},
+    )
+    assert status == "completed"
+
+
+def test_second_same_key_run_returns_existing_generation(client, owned_session, api_headers, db_session):
+    """A second same-key POST after the first run finishes never starts a new generation.
+
+    The replayed run must hold exactly one generation — one ``run.started`` and one set
+    of deltas — even though the same idempotency key was used twice.
+    """
+    path = f"/internal/v1/sessions/{owned_session}/runs"
+    body = {"content": "hello", "idempotency_key": "same-key-twice"}
+
+    with client.stream("POST", path, headers=api_headers, json=body) as resp:
+        assert resp.status_code == 200, resp.text
+        first = _parse_sse(resp.iter_lines())
+    with client.stream("POST", path, headers=api_headers, json=body) as resp:
+        assert resp.status_code == 200, resp.text
+        second = _parse_sse(resp.iter_lines())
+
+    assert first[-1].kind == "run.completed"
+    # Both connections saw the same run; the second was a pure replay, so the events
+    # it received are a subset of the first's (no second run.started, no extra deltas).
+    first_ids = {e.id for e in first}
+    assert all(e.id in first_ids for e in second)
+    assert len([e for e in first if e.kind == "run.started"]) == 1
+    assert len([e for e in first if e.kind == "message.delta"]) == GENERATION_DELTA_COUNT

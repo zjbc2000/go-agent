@@ -13,8 +13,30 @@ function serviceRoleEnv() {
 }
 
 /**
+ * Ensure the seeded session row exists (agent-service pytest runs truncate the chat
+ * tables, which deletes it). Idempotent upsert via the service role.
+ */
+export async function ensureSession(
+  api: APIRequestContext,
+  sessionId: string,
+  userId: string,
+): Promise<void> {
+  const { url, key } = serviceRoleEnv();
+  const headers = {
+    apikey: key,
+    Authorization: `Bearer ${key}`,
+    "Content-Type": "application/json",
+    Prefer: "resolution=ignore-duplicates",
+  };
+  await api.post(`${url}/rest/v1/sessions?on_conflict=id`, {
+    headers,
+    data: [{ id: sessionId, user_id: userId, title: "E2E Session" }],
+  });
+}
+
+/**
  * Remove all messages, stream events, and runs for a session so each E2E run starts
- * from a clean slate (the same user/session rows are re-seeded via seed.sql).
+ * from a clean slate (the user/session rows are re-seeded via seed.sql).
  */
 export async function cleanSession(api: APIRequestContext, sessionId: string): Promise<void> {
   const { url, key } = serviceRoleEnv();

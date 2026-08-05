@@ -20,5 +20,9 @@ export async function login(page: Page, user: TestUser = E2E_USER): Promise<void
   await page.getByLabel("邮箱", { exact: true }).fill(user.email);
   await page.getByLabel("密码", { exact: true }).fill(user.password);
   await page.getByRole("button", { name: "登录", exact: true }).click();
-  await page.waitForURL("**/chat/**", { timeout: 15000 });
+  // The post-login redirect is a Next App Router client-side navigation, which never
+  // fires a document "load" event; wait for the committed URL instead. Accept either
+  // /chat (no sessions) or /chat/<id>. The generous timeout absorbs the cold
+  // `pnpm dev` first compile.
+  await page.waitForURL(/\/chat(\/.*)?$/, { waitUntil: "commit", timeout: 30000 });
 }

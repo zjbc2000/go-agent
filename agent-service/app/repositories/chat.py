@@ -24,7 +24,7 @@ from app.models.chat import AgentRun
 from app.models.chat import Message as MessageRecord
 from app.models.chat import Session as SessionRecord
 from app.models.chat import StreamEvent as StreamEventRecord
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
@@ -349,6 +349,21 @@ class ChatRepository:
             run.status = status
             run.updated_at = _utcnow()
             await session.flush()
+
+    async def claim_streaming(self, context: RequestContext, run_id: uuid.UUID) -> bool:
+        """Atomically claim the right to generate for a queued run.
+
+        A conditional ``queued -> streaming`` update returns rowcount 1 for exactly one
+        caller; every overlapping same-key request observes rowcount 0 and must not start
+        a second generation.
+        """
+        async with self._transaction(context) as session:
+            result = cast(CursorResult[Any], await session.execute(
+                update(AgentRun)
+                .where(AgentRun.id == run_id, AgentRun.status == "queued")
+                .values(status="streaming", updated_at=_utcnow())
+            ))
+            return result.rowcount == 1
 
     async def finalize_message(
         self, context: RequestContext, message_id: uuid.UUID, content: str, status: str = "completed"

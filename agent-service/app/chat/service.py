@@ -9,6 +9,7 @@ history and skips deltas that were already persisted (deterministic in tests; fo
 real LLM this yields a fresh continuation, which is acceptable for the MVP).
 """
 
+import asyncio
 import json
 import logging
 from collections.abc import AsyncIterator
@@ -35,6 +36,17 @@ class ChatService:
         self._repo = repo
         self._provider = provider
         self._retention = retention
+        # Per-run in-process generation locks. Only one generator runs per run at a
+        # time, so overlapping same-key requests can never double-generate; a reconnect
+        # acquires the lock after the interrupted generator was cancelled and resumes.
+        self._generation_locks: dict[UUID, asyncio.Lock] = {}
+
+    def _lock_for(self, run_id: UUID) -> asyncio.Lock:
+        lock = self._generation_locks.get(run_id)
+        if lock is None:
+            lock = asyncio.Lock()
+            self._generation_locks[run_id] = lock
+        return lock
 
     async def create_run(
         self, context: RequestContext, session_id: UUID, content: str, idempotency_key: str
@@ -52,7 +64,12 @@ class ChatService:
     async def stream_run(
         self, context: RequestContext, run_id: UUID, after: int
     ) -> AsyncIterator[StreamEvent]:
-        """Yield a run's stream: replay missed events, then follow live generation."""
+        """Yield a run's stream: replay missed events, then follow live generation.
+
+        Generation is guarded by a ``queued -> streaming`` DB claim plus an in-process
+        per-run lock, so two overlapping same-key requests can never run two generators:
+        only the claim winner (or a reconnect that waits for the owner) runs ``_generate``.
+        """
         run = await self._repo.get_run(context, run_id)
         if run is None:
             raise ApiError("NOT_FOUND", "Run not found.", False)
@@ -61,19 +78,36 @@ class ChatService:
                 yield event
             return
         # Replay whatever is already persisted beyond the client's cursor.
-        for event in await self._repo.list_events(context, run_id, after):
+        cursor = after
+        for event in await self._repo.list_events(context, run_id, cursor):
             yield event
-        if run.status == "queued":
-            await self._repo.update_run_status(context, run_id, "streaming")
-            started = await self._repo.append_event(
-                run_id,
-                "run.started",
-                json.dumps({"messageId": str(run.assistant_message_id), "runId": str(run_id)}),
-            )
-            yield started
-        persisted_deltas = await self._repo.count_stream_events(context, run_id, "message.delta")
-        async for event in self._generate(context, run_id, persisted_deltas):
-            yield event
+            cursor = max(cursor, event.sequence)
+        async with self._lock_for(run_id):
+            run = await self._repo.get_run(context, run_id)
+            if run is None:
+                raise ApiError("NOT_FOUND", "Run not found.", False)
+            if run.status in ("completed", "failed"):
+                for event in await self._repo.list_events(context, run_id, cursor):
+                    yield event
+                return
+            if run.status == "queued":
+                if not await self._repo.claim_streaming(context, run_id):
+                    # A concurrent same-key request won the claim; it owns generation.
+                    return
+                started = await self._repo.append_event(
+                    run_id,
+                    "run.started",
+                    json.dumps({"messageId": str(run.assistant_message_id), "runId": str(run_id)}),
+                )
+                yield started
+                cursor = max(cursor, started.sequence)
+            # Replay anything persisted while we waited for the lock, then follow live.
+            for event in await self._repo.list_events(context, run_id, cursor):
+                yield event
+                cursor = max(cursor, event.sequence)
+            persisted_deltas = await self._repo.count_stream_events(context, run_id, "message.delta")
+            async for event in self._generate(context, run_id, persisted_deltas):
+                yield event
 
     async def replay(
         self, context: RequestContext, run_id: UUID, after: int

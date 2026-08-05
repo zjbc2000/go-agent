@@ -68,6 +68,18 @@ def chat_repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> ChatRep
 
 
 @pytest.fixture
+def assistant_graph(engine: AsyncEngine, cipher: LocalEnvelopeCipher):
+    from app.agent.graph import build_assistant_graph
+    from app.chat.provider import DeterministicProvider
+    from app.repositories.planning import DocumentRepository
+
+    documents = DocumentRepository(
+        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
+    )
+    return build_assistant_graph(DeterministicProvider(delay_seconds=0.0), documents)
+
+
+@pytest.fixture
 def user_context() -> RequestContext:
     return _context(uuid.uuid4())
 

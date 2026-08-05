@@ -115,7 +115,10 @@ def service(
     repository: DocumentRepository, chat_repository: ChatRepository, cipher: LocalEnvelopeCipher
 ) -> PlanningService:
     """A planning service wired to the test DB and a deterministic chat service."""
-    chat = ChatService(chat_repository, DeterministicProvider(), timedelta(days=7))
+    from app.agent.graph import build_assistant_graph
+
+    graph = build_assistant_graph(DeterministicProvider(delay_seconds=0.0), repository)
+    chat = ChatService(chat_repository, DeterministicProvider(), timedelta(days=7), graph=graph)
     return PlanningService(repository=repository, cipher=cipher, chat=chat)
 
 

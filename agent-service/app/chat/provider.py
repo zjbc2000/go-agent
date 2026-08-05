@@ -8,7 +8,7 @@ in tests, where determinism matters.
 
 import asyncio
 import json
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Callable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -39,6 +39,9 @@ class ProviderMessage:
 class ModelProvider(Protocol):
     def stream(self, messages: list[ProviderMessage]) -> AsyncIterator[ProviderDelta]: ...
 
+    async def complete(self, messages: list[ProviderMessage], *, json_schema: bool = False) -> str: ...
+
+
 
 class DeterministicProvider:
     """An offline provider that yields a fixed token sequence.
@@ -52,16 +55,27 @@ class DeterministicProvider:
         text: str = DEFAULT_FAKE_TEXT,
         chunk_size: int = 8,
         delay_seconds: float = 0.0,
+        *,
+        complete_response: str | None = None,
+        complete_fn: Callable[[list[ProviderMessage]], str] | None = None,
     ) -> None:
         self._text = text
         self._chunk_size = chunk_size
         self._delay_seconds = delay_seconds
+        # Default: a chitchat intent with no draft — keeps existing chat tests green.
+        self._complete_response = complete_response or json.dumps({"intent": "chitchat"})
+        self._complete_fn = complete_fn
 
     async def stream(self, messages: list[ProviderMessage]) -> AsyncIterator[ProviderDelta]:
         for i in range(0, len(self._text), self._chunk_size):
             if self._delay_seconds > 0:
                 await asyncio.sleep(self._delay_seconds)
             yield ProviderDelta(text=self._text[i : i + self._chunk_size])
+
+    async def complete(self, messages: list[ProviderMessage], *, json_schema: bool = False) -> str:
+        if self._complete_fn is not None:
+            return self._complete_fn(messages)
+        return self._complete_response
 
 
 class OpenAICompatibleProvider:
@@ -98,6 +112,32 @@ class OpenAICompatibleProvider:
                         if delta:
                             yield ProviderDelta(text=delta)
         except httpx.HTTPError as exc:
+            raise ApiError("MODEL_UNAVAILABLE", "Model provider is unavailable.", True) from exc
+
+    async def complete(self, messages: list[ProviderMessage], *, json_schema: bool = False) -> str:
+        payload = {
+            "model": self._model,
+            "messages": [{"role": m.role, "content": m.content} for m in messages],
+            "stream": False,
+        }
+        headers = {"Authorization": f"Bearer {self._api_key}", "Content-Type": "application/json"}
+        if json_schema:
+            payload["response_format"] = {"type": "json_object"}
+        try:
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    f"{self._base_url}/chat/completions", json=payload, headers=headers
+                )
+                if response.status_code == 400 and json_schema:
+                    # Some OpenAI-compatible endpoints reject response_format; retry plain.
+                    payload.pop("response_format", None)
+                    response = await client.post(
+                        f"{self._base_url}/chat/completions", json=payload, headers=headers
+                    )
+                response.raise_for_status()
+                data = response.json()
+                return data["choices"][0]["message"]["content"]
+        except (httpx.HTTPError, KeyError, IndexError, TypeError, ValueError) as exc:
             raise ApiError("MODEL_UNAVAILABLE", "Model provider is unavailable.", True) from exc
 
 

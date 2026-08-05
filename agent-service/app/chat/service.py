@@ -14,9 +14,10 @@ import json
 import logging
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from uuid import UUID
 
-from app.chat.provider import ModelProvider, ProviderMessage
+from app.chat.provider import ModelProvider
 from app.core.context import RequestContext
 from app.core.errors import ApiError
 from app.repositories.chat import ChatRepository, ChatSession, CreatedRun, Message, StreamEvent
@@ -32,14 +33,22 @@ class ChatService:
         repo: ChatRepository,
         provider: ModelProvider,
         retention: timedelta,
+        *,
+        graph: Any = None,
     ) -> None:
         self._repo = repo
         self._provider = provider
         self._retention = retention
+        self._graph = graph
+        self._draft_writer: Any = None
         # Per-run in-process generation locks. Only one generator runs per run at a
         # time, so overlapping same-key requests can never double-generate; a reconnect
         # acquires the lock after the interrupted generator was cancelled and resumes.
         self._generation_locks: dict[UUID, asyncio.Lock] = {}
+
+    def set_draft_writer(self, writer: Any) -> None:
+        """Bind the planning service's ``create_document_draft`` for graph draft persistence."""
+        self._draft_writer = writer
 
     def _lock_for(self, run_id: UUID) -> asyncio.Lock:
         lock = self._generation_locks.get(run_id)
@@ -73,7 +82,7 @@ class ChatService:
         run = await self._repo.get_run(context, run_id)
         if run is None:
             raise ApiError("NOT_FOUND", "Run not found.", False)
-        if run.status in ("completed", "failed"):
+        if run.status in ("completed", "failed", "waiting_approval"):
             for event in await self._repo.list_events(context, run_id, after):
                 yield event
             return
@@ -86,7 +95,7 @@ class ChatService:
             run = await self._repo.get_run(context, run_id)
             if run is None:
                 raise ApiError("NOT_FOUND", "Run not found.", False)
-            if run.status in ("completed", "failed"):
+            if run.status in ("completed", "failed", "waiting_approval"):
                 for event in await self._repo.list_events(context, run_id, cursor):
                     yield event
                 return
@@ -119,8 +128,16 @@ class ChatService:
         for event in await self._repo.list_events(context, run_id, after):
             yield event
 
+    async def create_session(self, context: RequestContext, title: str = "New chat") -> ChatSession:
+        return await self._repo.create_session(context, title)
+
     async def list_sessions(self, context: RequestContext) -> list[ChatSession]:
         return await self._repo.list_sessions(context)
+
+    async def delete_session(self, context: RequestContext, session_id: UUID) -> None:
+        """Delete a session and its cascade; 404 if not owned by the caller."""
+        if not await self._repo.delete_session(context, session_id):
+            raise ApiError("NOT_FOUND", "Session not found.", False)
 
     async def list_messages(self, context: RequestContext, session_id: UUID) -> list[Message]:
         return await self._repo.list_messages(context, session_id)
@@ -131,18 +148,23 @@ class ChatService:
         return await self._repo.purge_expired_events(before)
 
     async def complete_run_with_message(
-        self, context: RequestContext, run_id: UUID, content: str
+        self, context: RequestContext, run_id: UUID, content: str | None
     ) -> None:
-        """Finalize a run's assistant message with ``content`` and mark it completed.
+        """Finalize a run's assistant message and mark it completed.
 
-        No-op when the run is already terminal. Used by the planning service to emit
-        the ``run.completed`` notification after a document approval commits; the
-        approval transaction is the atomic unit, this event is a follow-on.
+        No-op when the run is already terminal. Used by the planning service after a
+        document approval commits (approve passes the activated body; reject/regenerate
+        pass None). The approval transaction is the atomic unit, this event is a follow-on.
+        If the assistant message was already finalized ``completed`` (a draft run keeps
+        the streamed explanation as its visible content), its content is preserved and
+        only the run status + ``run.completed`` event are written.
         """
         run = await self._repo.get_run(context, run_id)
         if run is None or run.status in ("completed", "failed", "cancelled"):
             return
-        await self._repo.finalize_message(context, run.assistant_message_id, content)
+        message = await self._repo.get_message(context, run.assistant_message_id)
+        if message is None or message.status != "completed":
+            await self._repo.finalize_message(context, run.assistant_message_id, content or "")
         await self._repo.update_run_status(context, run_id, "completed")
         await self._repo.append_event(
             run_id, "run.completed", json.dumps({"messageId": str(run.assistant_message_id)})
@@ -156,24 +178,79 @@ class ChatService:
             raise ApiError("NOT_FOUND", "Run not found.", False)
         message_id = run.assistant_message_id
         history = [
-            ProviderMessage(role=m.role, content=m.content)
+            {"role": m.role, "content": m.content}
             for m in await self._repo.list_messages(context, run.session_id)
             if m.status == "completed"
         ]
+        token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        async def _run_graph() -> dict:
+            """Run the assistant graph; always unblock the drain loop when it ends."""
+            try:
+                return await self._graph.ainvoke(
+                    {"history": history},
+                    config={
+                        "configurable": {
+                            "context": context,
+                            "queue": token_queue,
+                            "run_id": run_id,
+                            "draft_writer": self._draft_writer,
+                        }
+                    },
+                )
+            finally:
+                await token_queue.put(None)
+
+        producer = asyncio.create_task(_run_graph())
         delta_index = 0
         try:
-            async for delta in self._provider.stream(history):
-                if delta_index < skip:
+            try:
+                while True:
+                    text = await token_queue.get()
+                    if text is None:
+                        break
+                    if delta_index < skip:
+                        delta_index += 1
+                        continue
+                    event = await self._repo.append_event(
+                        run_id,
+                        "message.delta",
+                        json.dumps({"messageId": str(message_id), "text": text}),
+                    )
+                    yield event
                     delta_index += 1
-                    continue
-                event = await self._repo.append_event(
-                    run_id,
-                    "message.delta",
-                    json.dumps({"messageId": str(message_id), "text": delta.text}),
-                )
-                yield event
-                delta_index += 1
+            finally:
+                # Client disconnect closes this generator at the yield above; cancel the
+                # graph task so it never leaks.
+                if not producer.done():
+                    producer.cancel()
+            state = await producer
             content = await self._collect_text(context, run_id)
+            draft_approval = state.get("draft_approval")
+            if draft_approval is not None:
+                # A document draft ends the stream here: no run.completed yet. The
+                # assistant message keeps the streamed explanation; the draft card shows
+                # the proposed doc body. Approval (approve/reject/regenerate) later
+                # completes the run via complete_run_with_message.
+                await self._repo.finalize_message(context, message_id, content)
+                await self._repo.update_run_status(context, run_id, "waiting_approval")
+                draft_event = await self._repo.append_event(
+                    run_id,
+                    "document.draft",
+                    json.dumps(
+                        {
+                            "approvalId": draft_approval["approval_id"],
+                            "sessionId": str(run.session_id),
+                            "messageId": str(message_id),
+                            "type": draft_approval["type"],
+                            "title": draft_approval["title"],
+                            "body": draft_approval["body"],
+                            "createdAt": datetime.now(UTC).isoformat(),
+                        }
+                    ),
+                )
+                yield draft_event
+                return
             await self._repo.finalize_message(context, message_id, content)
             await self._repo.update_run_status(context, run_id, "completed")
             done = await self._repo.append_event(

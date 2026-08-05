@@ -10,6 +10,7 @@ from datetime import timedelta
 from fastapi import Depends, FastAPI, Request
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.agent.graph import build_assistant_graph
 from app.chat.deps import get_request_context, require_internal_token
 from app.chat.provider import build_provider
 from app.chat.router import router as chat_router
@@ -62,17 +63,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     session_factory = async_sessionmaker(engine, expire_on_commit=False)
     cipher = LocalEnvelopeCipher.from_base64_key(settings.crypto_key_b64)
     repo = ChatRepository(session_factory=session_factory, cipher=cipher)
+    planning_repository = DocumentRepository(session_factory=session_factory, cipher=cipher)
+    provider = build_provider(settings)
+    assistant_graph = build_assistant_graph(provider, planning_repository)
     service = ChatService(
         repo=repo,
-        provider=build_provider(settings),
+        provider=provider,
         retention=timedelta(seconds=settings.stream_event_retention_seconds),
+        graph=assistant_graph,
     )
-    planning_repository = DocumentRepository(session_factory=session_factory, cipher=cipher)
     planning_service = PlanningService(
         repository=planning_repository,
         cipher=cipher,
         chat=service,
     )
+    service.set_draft_writer(planning_service.create_document_draft)
     execution_repository = ExecutionRepository(session_factory=session_factory, cipher=cipher)
     app.state.execution_repository = execution_repository
     mcp_registry = McpRegistry(session_factory=session_factory)

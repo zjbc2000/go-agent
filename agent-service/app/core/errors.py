@@ -41,9 +41,15 @@ _STATUS_BY_CODE: Final[dict[ErrorCode, int]] = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass
 class ApiError(Exception):
-    """A typed, user-safe API error serialized into the standard envelope."""
+    """A typed, user-safe API error serialized into the standard envelope.
+
+    Deliberately not frozen: ``asynccontextmanager`` re-attaches ``__traceback__``
+    to exceptions propagating out of an ``async with`` block (e.g. ``user_scoped_session``),
+    which frozen dataclasses reject with ``FrozenInstanceError``. Instances are still
+    treated as immutable in practice; the request-id copy uses ``dataclasses.replace``.
+    """
 
     code: ErrorCode
     message: str

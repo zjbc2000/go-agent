@@ -221,6 +221,12 @@ export function createMockPlanningRepository(): PlanningRepository {
       );
     },
 
+    async deleteDocument(documentId: string): Promise<void> {
+      await delay(150);
+      documents = documents.filter((d) => d.id !== documentId);
+      delete versions[documentId];
+    },
+
     async requestExecution(
       documentId: string,
       _inputs: Record<string, unknown>,

@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { useRouter } from "next/navigation";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useRepositories } from "@/lib/providers/repository-context";
 import { AppShell } from "@/components/layout/AppShell";
@@ -10,19 +9,15 @@ import { Composer } from "@/components/chat/Composer";
 import { ConnectionBanner } from "@/components/chat/ConnectionBanner";
 
 export default function ChatPage() {
-  const router = useRouter();
-  const { activeSessionId, loadSessions, sessions, setActiveSession } = useChatStore();
+  const { loadSessions, setActiveSession } = useChatStore();
   const { chat: chatRepo } = useRepositories();
 
   useEffect(() => {
-    async function init() {
-      const allSessions = await chatRepo.listSessions();
-      if (allSessions.length > 0) {
-        router.replace(`/chat/${allSessions[0].id}`);
-      }
-    }
-    init();
-  }, [chatRepo, router]);
+    // /chat is the "start new chat" page: load the session list for the sidebar but
+    // clear any stale active session so the first message creates a fresh session.
+    setActiveSession(null);
+    loadSessions(chatRepo);
+  }, [chatRepo, loadSessions, setActiveSession]);
 
   return (
     <AppShell>

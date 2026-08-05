@@ -69,7 +69,7 @@ export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentP
   const handleDelete = async () => {
     setDeleting(true);
     try {
-      // Mock delete — just hide it
+      await planningRepo.deleteDocument(doc.id);
       setDeleted(true);
       toast.success("已删除");
       onUpdated();

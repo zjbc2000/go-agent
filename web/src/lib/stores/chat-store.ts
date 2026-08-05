@@ -20,8 +20,9 @@ interface ChatStore {
   sessions: Session[];
   activeSessionId: string | null;
   loadSessions: (repo: ChatRepository) => Promise<void>;
-  setActiveSession: (id: string) => void;
+  setActiveSession: (id: string | null) => void;
   addSession: (session: Session) => void;
+  removeSession: (sessionId: string) => void;
 
   // Messages
   messages: Message[];
@@ -65,12 +66,16 @@ export const useChatStore = create<ChatStore>((set, get) => ({
     set({ sessions });
   },
 
-  setActiveSession(id: string) {
+  setActiveSession(id: string | null) {
     set({ activeSessionId: id, messages: [], drafts: [], chatState: "idle" });
   },
 
   addSession(session: Session) {
     set((s) => ({ sessions: [session, ...s.sessions] }));
+  },
+
+  removeSession(sessionId: string) {
+    set((s) => ({ sessions: s.sessions.filter((x) => x.id !== sessionId) }));
   },
 
   messages: [],

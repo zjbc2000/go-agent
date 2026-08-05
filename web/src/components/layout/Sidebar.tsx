@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
 import { Plus, MessageSquare, Compass, Settings, PanelLeftClose, PanelLeft } from "lucide-react";
@@ -10,6 +11,8 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { GoudanLogo } from "@/components/brand/GoudanLogo";
 import { SessionList } from "@/components/chat/SessionList";
 import { useUIStore } from "@/lib/stores/ui-store";
+import { useChatStore } from "@/lib/stores/chat-store";
+import { useRepositories } from "@/lib/providers/repository-context";
 
 const NAV_ITEMS = [
   { href: "/chat", label: "对话", icon: MessageSquare },
@@ -24,6 +27,22 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const { sidebarOpen, toggleSidebar } = useUIStore();
+  const { addSession } = useChatStore();
+  const { chat: chatRepo } = useRepositories();
+  const [creating, setCreating] = useState(false);
+
+  const handleNewChat = async () => {
+    if (creating) return;
+    setCreating(true);
+    try {
+      const session = await chatRepo.createSession();
+      addSession(session);
+      useChatStore.setState({ activeSessionId: session.id });
+      router.push(`/chat/${session.id}`);
+    } finally {
+      setCreating(false);
+    }
+  };
 
   if (!sidebarOpen) {
     return (
@@ -79,12 +98,16 @@ export function Sidebar() {
 
       {/* New Chat */}
       <div className="px-3 pt-3">
-        <Link href="/chat">
-          <Button variant="outline" className="w-full justify-start gap-2" size="sm">
-            <Plus className="h-4 w-4" />
-            新建对话
-          </Button>
-        </Link>
+        <Button
+          variant="outline"
+          className="w-full justify-start gap-2"
+          size="sm"
+          onClick={handleNewChat}
+          disabled={creating}
+        >
+          <Plus className="h-4 w-4" />
+          {creating ? "创建中..." : "新建对话"}
+        </Button>
       </div>
 
       {/* Navigation */}

@@ -1,11 +1,14 @@
 "use client";
 
 import { useState, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { Send, Square } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { useChatStore } from "@/lib/stores/chat-store";
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { useRepositories } from "@/lib/providers/repository-context";
+import { ChatStreamError } from "@/lib/api/real-chat-repository";
 import { generateRequestId } from "@/lib/utils/id";
 import type { ChatEvent, ChatState, RunStream } from "@/lib/domain/types";
 
@@ -32,7 +35,9 @@ export function Composer() {
     getRunState,
   } = useChatStore();
 
-  const { chat: chatRepo } = useRepositories();
+  const { chat: chatRepo, auth: authRepo } = useRepositories();
+  const { logout } = useAuthStore();
+  const router = useRouter();
 
   const isStreaming =
     chatState === "streaming" || chatState === "connecting" || chatState === "reconnecting";
@@ -46,6 +51,20 @@ export function Composer() {
     },
     [setChatState, setShowConnectionBanner],
   );
+
+  // A 401/AUTH_REQUIRED from the BFF means the end-user's session expired. Terminate
+  // the run and route to re-login so the user can recover, instead of retrying a
+  // doomed stream as a network drop.
+  const handleAuthRequired = useCallback(async () => {
+    setChatState("stopped");
+    setShowConnectionBanner(false);
+    try {
+      await logout(authRepo);
+    } catch {
+      // Even if the logout call fails, still route to login.
+    }
+    router.replace("/login");
+  }, [logout, authRepo, router, setChatState, setShowConnectionBanner]);
 
   // Handle streaming events
   const handleChatEvent = useCallback(
@@ -102,7 +121,17 @@ export function Composer() {
           break;
 
         case "error":
+          // Surface the provider-failure message (retriable terminal error) on the
+          // streaming assistant message so the user sees why generation stopped.
           setChatStatus("error");
+          useChatStore.setState((s) => {
+            const msgs = [...s.messages];
+            const lastIdx = msgs.length - 1;
+            if (lastIdx >= 0 && msgs[lastIdx].role === "assistant") {
+              msgs[lastIdx] = { ...msgs[lastIdx], status: "error", error: event.message };
+            }
+            return { messages: msgs };
+          });
           break;
       }
     },
@@ -148,8 +177,11 @@ export function Composer() {
           handleChatEvent(event);
         }
         return true;
-      } catch {
-        // Dropped stream — the caller decides whether to reconnect.
+      } catch (error) {
+        // AUTH_REQUIRED is not a network drop — surface it to the caller so it can
+        // route to re-login instead of retrying a doomed stream.
+        if (error instanceof ChatStreamError && error.isAuthRequired) throw error;
+        // Genuine network/stream interruption — the caller decides whether to reconnect.
         return false;
       }
     };
@@ -187,9 +219,13 @@ export function Composer() {
       }
       clearRunState(sessionId);
       setChatStatus(ok && !terminalError ? "completed" : "error");
-    } catch {
+    } catch (error) {
       if (signal.aborted) {
         setChatStatus("stopped");
+        return;
+      }
+      if (error instanceof ChatStreamError && error.isAuthRequired) {
+        await handleAuthRequired();
         return;
       }
       setChatStatus("error");
@@ -210,6 +246,7 @@ export function Composer() {
     getRunState,
     setChatStatus,
     handleChatEvent,
+    handleAuthRequired,
   ]);
 
   const handleStop = useCallback(() => {

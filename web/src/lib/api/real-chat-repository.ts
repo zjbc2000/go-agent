@@ -15,6 +15,39 @@ import type { ChatRepository } from "@/lib/domain/repositories";
 
 const CHAT_API = "/api/v1/internal/v1";
 
+/** Typed chat-stream error carrying the BFF error envelope code. */
+export class ChatStreamError extends Error {
+  readonly code: string;
+
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = "ChatStreamError";
+    this.code = code;
+  }
+
+  /** True when the end-user's session is invalid and re-login is required. */
+  get isAuthRequired(): boolean {
+    return this.code === "AUTH_REQUIRED";
+  }
+}
+
+/**
+ * Classify a non-OK BFF response. A 401 carrying the `AUTH_REQUIRED` envelope (or any
+ * `AUTH_REQUIRED` envelope) becomes a typed `ChatStreamError` so callers can route to
+ * re-login instead of treating it as a retriable stream drop.
+ */
+function toStreamError(
+  status: number,
+  errBody: { error?: { code?: string; message?: string } } | null,
+): Error {
+  const code = errBody?.error?.code;
+  const message = errBody?.error?.message ?? `Chat stream failed: ${status}`;
+  if (status === 401 || code === "AUTH_REQUIRED") {
+    return new ChatStreamError("AUTH_REQUIRED", message);
+  }
+  return new Error(message);
+}
+
 interface SseFrame {
   id?: string;
   event?: string;
@@ -91,7 +124,7 @@ function streamRun(
     const res = await fetch(path, { method: "POST", headers, body, signal });
     if (!res.ok) {
       const errBody = await res.json().catch(() => null);
-      throw new Error(errBody?.error?.message ?? `Chat stream failed: ${res.status}`);
+      throw toStreamError(res.status, errBody);
     }
     if (!res.body) throw new Error("Chat stream has no body");
 
@@ -169,7 +202,7 @@ function openRunStream(path: string, body: string, signal: AbortSignal | undefin
         const res = await fetch(path, { method: "POST", headers, body, signal });
         if (!res.ok) {
           const errBody = await res.json().catch(() => null);
-          throw new Error(errBody?.error?.message ?? `Chat stream failed: ${res.status}`);
+          throw toStreamError(res.status, errBody);
         }
         if (!res.body) throw new Error("Chat stream has no body");
 
@@ -298,7 +331,8 @@ export function createRealChatRepository(): ChatRepository {
       const res = await fetch(`${CHAT_API}/runs/${runId}/events`);
       if (!res.ok) {
         if (res.status === 404) return null;
-        throw new Error("Failed to fetch run");
+        const errBody = await res.json().catch(() => null);
+        throw toStreamError(res.status, errBody);
       }
       if (!res.body) throw new Error("Run replay has no body");
 

@@ -1,6 +1,13 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { createRealChatRepository } from "@/lib/api/real-chat-repository";
+import { ChatStreamError, createRealChatRepository } from "@/lib/api/real-chat-repository";
 import type { ChatEvent } from "@/lib/domain/types";
+
+function jsonResponse(body: unknown, status = 200): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
 
 // --- SSE frame builders (mirror app/chat/events.py format_sse) ---
 
@@ -156,6 +163,35 @@ describe("RealChatRepository (run-first)", () => {
       code: "STREAM_INTERRUPTED",
       message: "生成失败，请重试。",
     });
+  });
+
+  it("createRun throws ChatStreamError on a 401 AUTH_REQUIRED envelope", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: { code: "AUTH_REQUIRED", message: "请先登录。" } }, 401));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = createRealChatRepository().createRun("sess-1", "hello", "req-1");
+    await expect(promise).rejects.toBeInstanceOf(ChatStreamError);
+    await expect(promise).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
+  });
+
+  it("subscribeRunEvents throws ChatStreamError on a 401 AUTH_REQUIRED envelope", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValue(jsonResponse({ error: { code: "AUTH_REQUIRED", message: "请先登录。" } }, 401));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const stream = createRealChatRepository().subscribeRunEvents({
+      sessionId: "sess-1",
+      content: "hello",
+      idempotencyKey: "req-1",
+      lastEventId: "2",
+    });
+    // Iteration itself must reject with the typed error.
+    const promise = stream.events[Symbol.asyncIterator]().next();
+    await expect(promise).rejects.toBeInstanceOf(ChatStreamError);
+    await expect(promise).rejects.toMatchObject({ code: "AUTH_REQUIRED" });
   });
 
   it("getRun reconstructs a run snapshot from the event replay", async () => {

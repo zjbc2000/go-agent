@@ -7,8 +7,11 @@ import type {
   ApprovalDecisionInput,
   ApprovalResult,
   DocumentVersion,
+  ExecutionApprovalDecision,
+  ExecutionDecisionResult,
   PlanningDocument,
   PlanningFilter,
+  SkillExecution,
   UpdateDocumentInput,
 } from "@/lib/domain/types";
 import { generateId } from "@/lib/utils/id";
@@ -216,6 +219,41 @@ export function createMockPlanningRepository(): PlanningRepository {
             }
           : d,
       );
+    },
+
+    async requestExecution(
+      documentId: string,
+      _inputs: Record<string, unknown>,
+      _idempotencyKey: string,
+    ): Promise<SkillExecution> {
+      await delay(100);
+      const doc = documents.find((d) => d.id === documentId);
+      if (!doc || doc.category !== "skill") throw new Error(`Skill document ${documentId} not found`);
+      return {
+        kind: "approval",
+        approval: {
+          approvalId: `exec-appr-${generateId("a")}`,
+          status: "pending",
+          expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+          createdAt: new Date().toISOString(),
+        },
+      };
+    },
+
+    async decideExecutionApproval(
+      _approvalId: string,
+      _decision: ExecutionApprovalDecision,
+      _idempotencyKey: string,
+    ): Promise<ExecutionDecisionResult> {
+      await delay(100);
+      return {
+        decision: "confirmed",
+        run: {
+          runId: `run-${generateId("r")}`,
+          status: "queued",
+          planHash: "mock-plan-hash",
+        },
+      };
     },
   };
 }

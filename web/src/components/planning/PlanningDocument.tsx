@@ -1,13 +1,17 @@
 "use client";
 
 import { useState } from "react";
-import type { PlanningDocument as PlanningDocumentType } from "@/lib/domain/types";
+import type {
+  PlanningDocument as PlanningDocumentType,
+  SkillExecution,
+} from "@/lib/domain/types";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useRepositories } from "@/lib/providers/repository-context";
 import { VersionHistory } from "./VersionHistory";
-import { Pencil, Trash2, History } from "lucide-react";
+import { SkillExecutionCard } from "@/components/approval/SkillExecutionCard";
+import { Pencil, Trash2, History, Play } from "lucide-react";
 import { toast } from "sonner";
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -22,11 +26,45 @@ interface PlanningDocumentProps {
   onUpdated: () => void;
 }
 
+/** Number of compiled steps in a skill manifest body, when it is valid JSON. */
+function skillStepCount(content: string): number | undefined {
+  try {
+    const manifest = JSON.parse(content) as { steps?: unknown[] };
+    if (Array.isArray(manifest.steps)) return manifest.steps.length;
+  } catch {
+    // Not a JSON manifest; the summary is omitted.
+  }
+  return undefined;
+}
+
 export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentProps) {
   const [showVersions, setShowVersions] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
+  const [executing, setExecuting] = useState(false);
+  const [execution, setExecution] = useState<SkillExecution | null>(null);
   const { planning: planningRepo } = useRepositories();
+
+  const isSkill = doc.category === "skill";
+
+  // "执行 Skill" on a skill-type document (a justified addition beyond the plan's
+  // file list): request an execution and show the returned approval/run card.
+  // Card state is client-side from the API response — no live polling.
+  const handleExecute = async () => {
+    setExecuting(true);
+    try {
+      const result = await planningRepo.requestExecution(
+        doc.id,
+        {},
+        `skill-exec:${doc.id}:${Date.now()}`,
+      );
+      setExecution(result);
+    } catch {
+      toast.error("Skill 执行失败，请重试");
+    } finally {
+      setExecuting(false);
+    }
+  };
 
   const handleDelete = async () => {
     setDeleting(true);
@@ -54,6 +92,18 @@ export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentP
             </Badge>
           </div>
           <div className="flex items-center gap-1 shrink-0">
+            {isSkill && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={handleExecute}
+                disabled={executing}
+              >
+                <Play className="h-3 w-3 mr-1" />
+                执行 Skill
+              </Button>
+            )}
             <Button
               variant="ghost"
               size="icon"
@@ -101,6 +151,14 @@ export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentP
               onRestored={onUpdated}
             />
           </div>
+        )}
+
+        {execution && (
+          <SkillExecutionCard
+            documentTitle={doc.title}
+            stepCount={skillStepCount(doc.content)}
+            execution={execution}
+          />
         )}
       </CardContent>
     </Card>

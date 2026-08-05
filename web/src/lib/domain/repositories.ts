@@ -8,6 +8,8 @@ import type {
   ApprovalResult,
   CreatedRun,
   DocumentVersion,
+  ExecutionApprovalDecision,
+  ExecutionDecisionResult,
   Message,
   PlanningDocument,
   PlanningFilter,
@@ -16,6 +18,7 @@ import type {
   RunStream,
   RunStreamOptions,
   Session,
+  SkillExecution,
   UpdateDocumentInput,
   User,
 } from "./types";
@@ -71,4 +74,22 @@ export interface PlanningRepository {
   decideApproval(input: ApprovalDecisionInput): Promise<ApprovalResult>;
   listVersions(documentId: string): Promise<DocumentVersion[]>;
   restoreVersion(documentId: string, versionId: string): Promise<void>;
+
+  /**
+   * Request a skill execution. Write/delete skills return a pending execution
+   * approval; read-only skills return a queued run. Card state is client-side
+   * from this response (a GET executions route is future work).
+   */
+  requestExecution(
+    documentId: string,
+    inputs: Record<string, unknown>,
+    idempotencyKey: string,
+  ): Promise<SkillExecution>;
+
+  /** Decide a pending execution approval (the UI sends "approve" for 确认执行). */
+  decideExecutionApproval(
+    approvalId: string,
+    decision: ExecutionApprovalDecision,
+    idempotencyKey: string,
+  ): Promise<ExecutionDecisionResult>;
 }

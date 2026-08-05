@@ -144,6 +144,62 @@ export interface PlanningFilter {
   search?: string;
 }
 
+// --- Skill execution ---
+
+export type ExecutionStatus =
+  | "queued"
+  | "running"
+  | "succeeded"
+  | "failed"
+  | "timed_out"
+  | "policy_denied";
+
+export type ExecutionApprovalStatus = "pending" | "confirmed" | "rejected" | "superseded";
+
+/** The execution-approval decision vocabulary (mirrors the planning approvals). */
+export type ExecutionApprovalDecision = "approve" | "reject" | "regenerate";
+
+export type ExecutionErrorCode =
+  | "SANDBOX_POLICY_DENIED"
+  | "SANDBOX_TIMEOUT"
+  | "MCP_UNAVAILABLE"
+  | "APPROVAL_EXPIRED";
+
+/** A pending 15-minute execution approval awaiting a human decision. */
+export interface ExecutionApproval {
+  approvalId: string;
+  status: ExecutionApprovalStatus;
+  expiresAt: string;
+  createdAt: string;
+}
+
+/** A queued sandbox run of an immutable plan (read-only skills queue immediately). */
+export interface SandboxRun {
+  runId: string;
+  status: ExecutionStatus;
+  planHash?: string;
+  error?: { code: ExecutionErrorCode; message: string };
+}
+
+/** The discriminated result of a skill execution request: approval XOR run. */
+export type SkillExecution =
+  | { kind: "approval"; approval: ExecutionApproval }
+  | { kind: "run"; run: SandboxRun };
+
+/** A typed error mapped from the backend envelope (never raw payloads or secrets). */
+export interface ExecutionDecisionError {
+  code: string;
+  message: string;
+  retryable?: boolean;
+}
+
+/** The outcome of deciding an execution approval (approve → run; error otherwise). */
+export interface ExecutionDecisionResult {
+  decision: string;
+  error?: ExecutionDecisionError;
+  run?: SandboxRun;
+}
+
 // --- Auth ---
 
 export interface User {

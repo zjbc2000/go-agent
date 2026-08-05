@@ -12,8 +12,14 @@ import type {
   ApprovalDecisionInput,
   ApprovalResult,
   DocumentVersion,
+  ExecutionApproval,
+  ExecutionApprovalDecision,
+  ExecutionDecisionResult,
+  ExecutionStatus,
   PlanningDocument,
   PlanningFilter,
+  SandboxRun,
+  SkillExecution,
 } from "@/lib/domain/types";
 
 const PLANNING_API = "/api/v1/internal/v1";
@@ -70,6 +76,40 @@ interface VersionRow {
   title: string;
   body: string;
   createdAt: string;
+}
+
+/** The backend execution envelope: exactly one of approval or run is present. */
+interface ExecutionEnvelope {
+  approval?: {
+    id: string;
+    status: string;
+    expiresAt: string;
+    createdAt: string;
+  };
+  run?: { id: string; status: string; planHash?: string };
+}
+
+/** The backend execution-decision envelope. */
+interface ExecutionDecisionEnvelope {
+  decision?: string;
+  run?: { id: string; status: string; planHash?: string };
+}
+
+function toExecutionApproval(row: NonNullable<ExecutionEnvelope["approval"]>): ExecutionApproval {
+  return {
+    approvalId: row.id,
+    status: row.status as ExecutionApproval["status"],
+    expiresAt: row.expiresAt,
+    createdAt: row.createdAt,
+  };
+}
+
+function toSandboxRun(row: NonNullable<ExecutionEnvelope["run"]>): SandboxRun {
+  return {
+    runId: row.id,
+    status: row.status as ExecutionStatus,
+    ...(row.planHash ? { planHash: row.planHash } : {}),
+  };
 }
 
 export function createRealPlanningRepository(): PlanningRepository {
@@ -156,6 +196,60 @@ export function createRealPlanningRepository(): PlanningRepository {
         { method: "POST" },
       );
       if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
+    },
+
+    async requestExecution(
+      documentId: string,
+      inputs: Record<string, unknown>,
+      idempotencyKey: string,
+    ): Promise<SkillExecution> {
+      const res = await fetch(`${PLANNING_API}/skills/${documentId}/executions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ inputs, idempotency_key: idempotencyKey }),
+      });
+      if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
+      const envelope = (await res.json()) as ExecutionEnvelope;
+      if (envelope.approval) {
+        return { kind: "approval", approval: toExecutionApproval(envelope.approval) };
+      }
+      if (envelope.run) {
+        return { kind: "run", run: toSandboxRun(envelope.run) };
+      }
+      throw new PlanningApiError("INTERNAL_ERROR", "Execution returned neither approval nor run.");
+    },
+
+    async decideExecutionApproval(
+      approvalId: string,
+      decision: ExecutionApprovalDecision,
+      idempotencyKey: string,
+    ): Promise<ExecutionDecisionResult> {
+      const res = await fetch(`${PLANNING_API}/skills/approvals/${approvalId}/decisions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ decision, idempotency_key: idempotencyKey }),
+      });
+      const envelope = (await res.json().catch(() => null)) as
+        | (ExecutionDecisionEnvelope & {
+            error?: { code?: string; message?: string; retryable?: boolean };
+          })
+        | null;
+      if (!res.ok) {
+        return {
+          decision: "error",
+          error: {
+            code: envelope?.error?.code ?? "INTERNAL_ERROR",
+            message: envelope?.error?.message ?? `Execution decision failed: ${res.status}`,
+            ...(envelope?.error?.retryable !== undefined
+              ? { retryable: envelope.error.retryable }
+              : {}),
+          },
+        };
+      }
+      return {
+        decision: envelope?.decision ?? "confirmed",
+        ...(envelope?.run ? { run: toSandboxRun(envelope.run) } : {}),
+      };
     },
   };
 }

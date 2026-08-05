@@ -183,4 +183,109 @@ describe("RealPlanningRepository", () => {
       createRealPlanningRepository().updateDocument("doc-1", { title: "T" }),
     ).rejects.toThrow(/edit-confirm approvals/);
   });
+
+  it("requestExecution POSTs the executions route and maps the approval envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        approval: {
+          id: "app-1",
+          status: "pending",
+          expiresAt: "2026-01-01T00:00:00Z",
+          createdAt: "2026-01-01T00:00:00Z",
+        },
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createRealPlanningRepository().requestExecution(
+      "doc-1",
+      { title: "x" },
+      "key-1",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/internal/v1/skills/doc-1/executions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ inputs: { title: "x" }, idempotency_key: "key-1" }),
+      }),
+    );
+    expect(result).toEqual({
+      kind: "approval",
+      approval: {
+        approvalId: "app-1",
+        status: "pending",
+        expiresAt: "2026-01-01T00:00:00Z",
+        createdAt: "2026-01-01T00:00:00Z",
+      },
+    });
+  });
+
+  it("requestExecution maps the run envelope", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ run: { id: "run-1", status: "queued", planHash: "abc123" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createRealPlanningRepository().requestExecution("doc-1", {}, "key-2");
+
+    expect(result).toEqual({
+      kind: "run",
+      run: { runId: "run-1", status: "queued", planHash: "abc123" },
+    });
+  });
+
+  it("requestExecution rejects with a typed error carrying the envelope code", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ error: { code: "SKILL_INVALID", message: "Not a skill." } }, 422),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const promise = createRealPlanningRepository().requestExecution("doc-1", {}, "key-3");
+    await expect(promise).rejects.toBeInstanceOf(PlanningApiError);
+    await expect(promise).rejects.toMatchObject({ code: "SKILL_INVALID" });
+  });
+
+  it("decideExecutionApproval POSTs the decisions route and maps the error code", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: { code: "APPROVAL_EXPIRED", message: "Execution approval has expired.", retryable: true } },
+        409,
+      ),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createRealPlanningRepository().decideExecutionApproval(
+      "app-1",
+      "approve",
+      "key-4",
+    );
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/internal/v1/skills/approvals/app-1/decisions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ decision: "approve", idempotency_key: "key-4" }),
+      }),
+    );
+    expect(result.decision).toBe("error");
+    expect(result.error?.code).toBe("APPROVAL_EXPIRED");
+    expect(result.error?.retryable).toBe(true);
+  });
+
+  it("decideExecutionApproval maps a successful confirm to the run", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({ decision: "confirmed", run: { id: "run-1", status: "queued", planHash: "abc" } }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createRealPlanningRepository().decideExecutionApproval(
+      "app-1",
+      "approve",
+      "key-5",
+    );
+
+    expect(result.decision).toBe("confirmed");
+    expect(result.run).toEqual({ runId: "run-1", status: "queued", planHash: "abc" });
+  });
 });

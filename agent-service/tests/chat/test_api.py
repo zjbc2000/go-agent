@@ -6,6 +6,7 @@ fake JWT verifier, so no network calls are made. Streaming is exercised via
 """
 
 import asyncio
+import json
 import uuid
 from datetime import timedelta
 
@@ -149,14 +150,16 @@ async def test_reconnect_resumes_run_without_second_user_message(
 
 
 async def test_concurrent_same_key_streams_persist_single_generation(
-    chat_repository, user_context, owned_session, db_session
+    chat_repository, assistant_graph, user_context, owned_session, db_session
 ):
     """Two overlapping same-key stream_run calls must never double-generate.
 
     Both consumers start on the same queued run; at most one may own generation, so
     the persisted stream holds exactly one ``run.started`` and one set of deltas.
     """
-    service = ChatService(chat_repository, DeterministicProvider(), timedelta(days=7))
+    service = ChatService(
+        chat_repository, DeterministicProvider(), timedelta(days=7), graph=assistant_graph
+    )
     created = await service.create_run(user_context, owned_session, "race", "race-key")
     run_id = created.run_id
 
@@ -210,3 +213,92 @@ def test_second_same_key_run_returns_existing_generation(client, owned_session, 
     assert all(e.id in first_ids for e in second)
     assert len([e for e in first if e.kind == "run.started"]) == 1
     assert len([e for e in first if e.kind == "message.delta"]) == GENERATION_DELTA_COUNT
+
+
+# --- POST /internal/v1/sessions (create session) ---
+
+
+async def test_create_session_returns_owned_session(client, api_headers, user_context):
+    resp = client.post("/internal/v1/sessions", headers=api_headers, json={})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["userId"] == str(user_context.user_id)
+    assert body["title"] == "New chat"
+    # The created session is listable by the caller.
+    listed = client.get("/internal/v1/sessions", headers=api_headers).json()
+    assert body["id"] in [s["id"] for s in listed]
+
+
+async def test_create_session_accepts_empty_body(client, api_headers, user_context):
+    """The frontend createSession() POSTs with NO body; it must not 422."""
+    resp = client.post("/internal/v1/sessions", headers=api_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["title"] == "New chat"
+
+
+async def test_create_session_rejects_malformed_body(client, api_headers):
+    resp = client.post(
+        "/internal/v1/sessions",
+        headers={**api_headers, "Content-Type": "application/json"},
+        content=b"not-json",
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_FAILED"
+
+
+async def test_create_session_accepts_custom_title(client, api_headers, user_context):
+    resp = client.post("/internal/v1/sessions", headers=api_headers, json={"title": "My plan"})
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["title"] == "My plan"
+
+
+async def test_create_session_requires_internal_token(client, user_context):
+    resp = client.post(
+        "/internal/v1/sessions",
+        headers={"Authorization": f"Bearer {user_context.user_id}"},
+        json={},
+    )
+    assert resp.status_code == 401
+
+
+async def test_delete_session_removes_session_and_cascade(
+    client, api_headers, user_context, chat_repository, owned_session, db_session
+):
+    # Seed a run + message so the cascade is exercised.
+    created = await chat_repository.create_run(user_context, owned_session, "hello", "del-key")
+    await chat_repository.append_event(
+        created.run_id, "run.started", json.dumps({"messageId": str(created.assistant_message_id)})
+    )
+
+    resp = client.delete(f"/internal/v1/sessions/{owned_session}", headers=api_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+
+    # Session, its runs, messages, and events are gone.
+    listed = client.get("/internal/v1/sessions", headers=api_headers).json()
+    assert owned_session not in [s["id"] for s in listed]
+    rows = await db_session.execute(
+        text("select count(*) from agent_runs where session_id = :sid"),
+        {"sid": str(owned_session)},
+    )
+    assert rows.scalar_one() == 0
+
+
+async def test_delete_session_not_owned_returns_404(client, api_headers, user_b_context, db_session):
+    # A session owned by another user is invisible under RLS -> 404.
+    sid = uuid.uuid4()
+    await db_session.execute(
+        text("insert into sessions (id, user_id, title) values (:id, :uid, 'other')"),
+        {"id": sid, "uid": user_b_context.user_id},
+    )
+    await db_session.commit()
+    resp = client.delete(f"/internal/v1/sessions/{sid}", headers=api_headers)
+    assert resp.status_code == 404
+
+
+async def test_delete_session_requires_internal_token(client, owned_session, user_context):
+    resp = client.delete(
+        f"/internal/v1/sessions/{owned_session}",
+        headers={"Authorization": f"Bearer {user_context.user_id}"},
+    )
+    assert resp.status_code == 401

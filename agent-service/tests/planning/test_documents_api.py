@@ -141,3 +141,27 @@ async def test_document_routes_are_user_scoped(client, repository, user_a, user_
     )
     assert restored.status_code == 404
     assert restored.json()["error"]["code"] == "NOT_FOUND"
+
+
+# --- DELETE document ----------------------------------------------------------
+
+
+async def test_delete_document_removes_owned_document(
+    client, repository, user_context, api_headers
+):
+    doc = await repository.create_active(user_context, type="task", title="to-delete", body="body")
+    resp = client.delete(f"/internal/v1/documents/{doc.id}", headers=api_headers)
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+    assert await repository.get(user_context, doc.id) is None
+
+
+async def test_delete_document_not_owned_returns_404(client, repository, user_a, user_b):
+    doc = await repository.create_active(user_a, type="task", title="private", body="secret")
+    headers_b = {
+        "X-Internal-Token": TEST_INTERNAL_TOKEN,
+        "Authorization": f"Bearer {user_b.user_id}",
+    }
+    resp = client.delete(f"/internal/v1/documents/{doc.id}", headers=headers_b)
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"

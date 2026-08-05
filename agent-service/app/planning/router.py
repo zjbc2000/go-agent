@@ -111,6 +111,19 @@ async def list_documents(
     return [_document_to_dict(document) for document in documents]
 
 
+@router.delete("/internal/v1/documents/{document_id}")
+async def delete_document(
+    document_id: UUID,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    repository: DocumentRepository = Depends(get_planning_repository),
+) -> dict:
+    """Hard-delete the caller's document (RLS-gated to the owner)."""
+    if not await repository.delete(context, document_id):
+        raise ApiError("NOT_FOUND", "Document not found.", False)
+    return {"ok": True}
+
+
 @router.get("/internal/v1/documents/{document_id}/versions")
 async def list_document_versions(
     document_id: UUID,

@@ -15,7 +15,10 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, Literal, cast
+from typing import TYPE_CHECKING, Any, Literal, cast
+
+if TYPE_CHECKING:
+    from app.planning.schemas import DraftApproval
 
 from app.core.context import RequestContext
 from app.core.crypto import EnvelopeCipher
@@ -292,6 +295,40 @@ class DocumentRepository:
             document.updated_at = _utcnow()
             await session.flush()
             return self._to_document(document, new_version_id)
+
+
+    async def get_pending_draft_for_run(
+        self, context: RequestContext, run_id: uuid.UUID
+    ) -> DraftApproval | None:
+        """Return the caller's pending draft linked to ``run_id``, or None (RLS-scoped).
+
+        Used by ``PlanningService.create_document_draft`` as an idempotency guard so a
+        reconnect that re-runs the assistant graph cannot create duplicate drafts.
+        """
+        from app.planning.schemas import DraftApproval as _DraftApproval
+
+        async with self._transaction(context) as session:
+            approval = await session.scalar(
+                select(ApprovalRecord).where(
+                    ApprovalRecord.run_id == run_id, ApprovalRecord.status == "pending"
+                )
+            )
+            if approval is None:
+                return None
+            draft = await session.scalar(
+                select(DocumentDraftRecord).where(DocumentDraftRecord.id == approval.draft_id)
+            )
+            if draft is None:
+                return None
+            payload = self._cipher.decrypt_json(approval.payload_ciphertext)
+            return _DraftApproval(
+                approval_id=approval.id,
+                draft_id=draft.id,
+                document_id=approval.document_id,
+                type=cast(DocumentType, payload["type"]),
+                title=self._cipher.decrypt(draft.title_ciphertext),
+                body=self._cipher.decrypt(draft.body_ciphertext),
+            )
 
 
 @dataclass(frozen=True)

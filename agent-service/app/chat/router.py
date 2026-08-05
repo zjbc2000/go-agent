@@ -84,6 +84,37 @@ async def stream_run_events(
     )
 
 
+@router.post("/internal/v1/sessions")
+async def create_session(
+    request: Request,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    service: ChatService = Depends(get_chat_service),
+) -> dict:
+    """Create a chat session owned by the caller. Optional ``title`` in the body."""
+    title = "New chat"
+    raw = await request.body()
+    if raw:
+        try:
+            body = await request.json()
+        except ValueError:
+            raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False) from None
+        if not isinstance(body, dict):
+            raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False)
+        if body.get("title") is not None:
+            if not isinstance(body["title"], str) or not body["title"].strip():
+                raise ApiError("VALIDATION_FAILED", "title must be a non-empty string.", False)
+            title = body["title"].strip()
+    session = await service.create_session(context, title)
+    return {
+        "id": str(session.id),
+        "title": session.title,
+        "createdAt": session.created_at.isoformat(),
+        "lastMessageAt": session.last_message_at.isoformat(),
+        "userId": str(session.user_id),
+    }
+
+
 @router.get("/internal/v1/sessions")
 async def list_sessions(
     _: None = Depends(require_internal_token),
@@ -101,6 +132,18 @@ async def list_sessions(
         }
         for s in sessions
     ]
+
+
+@router.delete("/internal/v1/sessions/{session_id}")
+async def delete_session(
+    session_id: UUID,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    service: ChatService = Depends(get_chat_service),
+) -> dict:
+    """Delete the caller's session and its messages/runs/events (RLS-scoped)."""
+    await service.delete_session(context, session_id)
+    return {"ok": True}
 
 
 @router.get("/internal/v1/sessions/{session_id}/messages")

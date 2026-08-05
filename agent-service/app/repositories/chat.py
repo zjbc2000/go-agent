@@ -91,6 +91,7 @@ class ChatSession:
     """A chat session owned by one user, with its last activity time."""
 
     id: uuid.UUID
+    user_id: uuid.UUID
     title: str
     created_at: datetime
     last_message_at: datetime
@@ -125,6 +126,22 @@ class ChatRepository:
     async def _service_session(self) -> AsyncIterator[AsyncSession]:
         async with service_session(self._session_factory) as session:
             yield session
+
+    async def create_session(
+        self, context: RequestContext, title: str = "New chat"
+    ) -> ChatSession:
+        """Create a chat session owned by the caller (RLS-scoped)."""
+        async with self._transaction(context) as session:
+            record = SessionRecord(id=uuid.uuid4(), user_id=context.user_id, title=title)
+            session.add(record)
+            await session.flush()
+            return ChatSession(
+                id=record.id,
+                user_id=record.user_id,
+                title=record.title,
+                created_at=record.created_at,
+                last_message_at=record.updated_at,
+            )
 
     async def create_run(
         self, context: RequestContext, session_id: uuid.UUID, content: str, idempotency_key: str
@@ -251,6 +268,25 @@ class ChatRepository:
                 for row in rows
             ]
 
+    async def get_message(self, context: RequestContext, message_id: uuid.UUID) -> Message | None:
+        """Return a message the caller owns, decrypted, or None (RLS-scoped)."""
+        async with self._transaction(context) as session:
+            row = await session.scalar(
+                select(MessageRecord).where(MessageRecord.id == message_id)
+            )
+            if row is None:
+                return None
+            return Message(
+                id=row.id,
+                role=row.role,
+                content=self._cipher.decrypt(row.content_ciphertext),
+                status=row.status,
+                session_id=row.session_id,
+                run_id=row.run_id,
+                sequence=row.sequence,
+                created_at=row.created_at,
+            )
+
     async def list_sessions(self, context: RequestContext) -> list[ChatSession]:
         """List the caller's sessions, most recently active first (RLS-scoped)."""
         async with self._transaction(context) as session:
@@ -264,6 +300,7 @@ class ChatRepository:
             return [
                 ChatSession(
                     id=row.id,
+                    user_id=row.user_id,
                     title=row.title,
                     created_at=row.created_at,
                     last_message_at=row.updated_at,
@@ -395,3 +432,33 @@ class ChatRepository:
             ))
             await session.flush()
             return result.rowcount if result.rowcount > 0 else 0
+
+    async def delete_session(self, context: RequestContext, session_id: uuid.UUID) -> bool:
+        """Hard-delete a session and its messages/runs/events (RLS-scoped to the owner).
+
+        Returns True if a row was deleted, False if the session was not found or not
+        owned by the caller. The chat tables carry no FKs (ownership is RLS), so the
+        cascade is explicit: stream_events -> agent_runs -> messages -> session.
+        """
+        async with self._transaction(context) as session:
+            row = await session.scalar(
+                select(SessionRecord).where(SessionRecord.id == session_id)
+            )
+            if row is None:
+                return False
+            await session.execute(
+                delete(StreamEventRecord).where(
+                    StreamEventRecord.run_id.in_(
+                        select(AgentRun.id).where(AgentRun.session_id == session_id)
+                    )
+                )
+            )
+            await session.execute(
+                delete(AgentRun).where(AgentRun.session_id == session_id)
+            )
+            await session.execute(
+                delete(MessageRecord).where(MessageRecord.session_id == session_id)
+            )
+            await session.delete(row)
+            await session.flush()
+            return True

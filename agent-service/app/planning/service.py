@@ -59,7 +59,11 @@ class PlanningService:
         document_id: UUID | None = None,
         run_id: UUID | None = None,
     ) -> DraftApproval:
-        """Create a pending proposal draft + approval with a canonical encrypted payload."""
+        """Create a pending proposal draft + approval with a canonical encrypted payload.
+
+        Idempotent per ``run_id``: a pending draft already linked to the run (e.g. a
+        reconnect re-running the assistant graph) returns the existing approval.
+        """
         if type not in _VALID_TYPES:
             raise ApiError(
                 "VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False
@@ -68,6 +72,10 @@ class PlanningService:
             raise ApiError("VALIDATION_FAILED", "title is required.", False)
         if not isinstance(body, str) or not body.strip():
             raise ApiError("VALIDATION_FAILED", "body is required.", False)
+        if run_id is not None:
+            existing = await self._repository.get_pending_draft_for_run(context, run_id)
+            if existing is not None:
+                return existing
 
         typed: DocumentType = cast(DocumentType, type)
         payload = {"type": typed, "title": title, "body": body}
@@ -133,9 +141,13 @@ class PlanningService:
             result = await self._decide(tx, context, pending, decision, edited_payload, idempotency_key)
 
         # Follow-on notification AFTER the approval transaction commits. The approval
-        # transaction is the atomic unit; the run event is appended only on approve.
-        if result.document is not None and run_id is not None and self._chat is not None:
-            await self._chat.complete_run_with_message(context, run_id, result.document.body)
+        # transaction is the atomic unit; the run event is a follow-on. Any terminal
+        # decision (approve/reject/regenerate) completes the linked run; approve passes
+        # the activated document body, the others pass None (ChatService keeps the
+        # already-streamed explanation as the assistant message content).
+        if run_id is not None and self._chat is not None:
+            content = result.document.body if result.document is not None else None
+            await self._chat.complete_run_with_message(context, run_id, content)
         return result
 
     async def _decide(

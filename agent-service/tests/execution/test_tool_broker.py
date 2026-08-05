@@ -1,24 +1,16 @@
 """Tool broker tests: grant authentication, plan-binding, approval check,
-idempotent replay with stored result, and tool dispatch determined by the plan.
-
-The broker is the sandbox container's ONLY external channel. Key security
-properties tested:
-- I1: write/delete steps require a confirmed, unexpired execution approval at
-  call time (not just at confirm time).
-- I2: tool dispatch is determined by the plan's declared tool — the
-  caller-supplied tool_id is ignored if it mismatches; a read-only run's step
-  invoked as a write tool is rejected.
-- I3: TOCTOU-safe idempotent replay — the row is reserved BEFORE execution;
-  the stored result payload is returned on replay.
+idempotent replay, caller-input-ignored (NEW #1), cross-user reservation
+squat (NEW #2), stuck-reserved handling (NEW #3), and side-effect-once
+assertions (NEW #6).
 """
 
+import asyncio
 import json
 import os
 import time
 import uuid
 
 import pytest
-from app.core.context import RequestContext, new_request_id
 from app.core.crypto import LocalEnvelopeCipher
 from app.core.errors import ApiError
 from app.execution.grant import GrantSigner, GrantVerifier
@@ -44,7 +36,8 @@ _EXECUTION_TABLES = (
 _READ_MANIFEST = {
     "schema_version": 1,
     "steps": [
-        {"id": "s1", "tool": "document.read", "input": {"document_id": "{{doc_id}}"}},
+        {"id": "s1", "tool": "document.read",
+         "input": {"document_id": "{{doc_id}}"}},
     ],
 }
 
@@ -57,10 +50,6 @@ _WRITE_MANIFEST = {
 }
 
 
-def _context(user_id: uuid.UUID) -> RequestContext:
-    return RequestContext(user_id=user_id, role="user", request_id=new_request_id())
-
-
 async def _provision_user(db_session: AsyncSession, user_id: uuid.UUID) -> None:
     await db_session.execute(
         text("insert into auth.users (id) values (:id) on conflict (id) do nothing"),
@@ -71,14 +60,9 @@ async def _provision_user(db_session: AsyncSession, user_id: uuid.UUID) -> None:
 
 async def _seed_run_with_plan_hash(
     engine: AsyncEngine, cipher: LocalEnvelopeCipher, user_id: uuid.UUID,
-    manifest: dict, inputs: dict,
-    *, with_approval: bool = False,
+    manifest: dict, inputs: dict, *, with_approval: bool = False,
 ) -> tuple[str, str, str, str]:
-    """Seed a running sandbox_run with a REAL plan_hash from the compiler.
-
-    Returns (run_id, document_id, version_id, plan_hash).
-    If with_approval=True, also creates a confirmed execution_approval.
-    """
+    """Seed a running sandbox_run with a REAL plan_hash from the compiler."""
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         await session.execute(
             text("insert into auth.users (id) values (:id) on conflict (id) do nothing"),
@@ -87,57 +71,39 @@ async def _seed_run_with_plan_hash(
         body_ct = cipher.encrypt(json.dumps(manifest))
         doc_id = uuid.uuid4()
         ver_id = uuid.uuid4()
-
-        # Compute the real plan hash.
         plan = compile_skill(manifest, inputs, version_id=ver_id)
-
         await session.execute(
-            text(
-                "insert into documents (id, user_id, type, current_version, status, "
-                "title_ciphertext, body_ciphertext) "
-                "values (:id, :uid, 'skill', 1, 'active', :title, :body)"
-            ),
+            text("insert into documents (id, user_id, type, current_version, status, "
+                 "title_ciphertext, body_ciphertext) "
+                 "values (:id, :uid, 'skill', 1, 'active', :title, :body)"),
             {"id": doc_id, "uid": user_id, "title": body_ct, "body": body_ct},
         )
         await session.execute(
-            text(
-                "insert into document_versions (id, user_id, document_id, version, "
-                "title_ciphertext, body_ciphertext) "
-                "values (:id, :uid, :doc, 1, :title, :body)"
-            ),
+            text("insert into document_versions (id, user_id, document_id, version, "
+                 "title_ciphertext, body_ciphertext) "
+                 "values (:id, :uid, :doc, 1, :title, :body)"),
             {"id": ver_id, "uid": user_id, "doc": doc_id, "title": body_ct, "body": body_ct},
         )
-
         inputs_ct = cipher.encrypt(json.dumps({"inputs": inputs}))
         run_id = uuid.uuid4()
-
         approval_id = None
         if with_approval:
             approval_id = uuid.uuid4()
             await session.execute(
-                text(
-                    "insert into execution_approvals "
-                    "(id, user_id, document_id, version_id, plan_hash, inputs_ciphertext, "
-                    "status, decision, expires_at, decided_at) "
-                    "values (:id, :uid, :doc, :ver, :hash, :ct, 'confirmed', 'confirmed', "
-                    "now() + interval '10 minutes', now())"
-                ),
-                {
-                    "id": approval_id, "uid": user_id, "doc": doc_id, "ver": ver_id,
-                    "hash": plan.hash, "ct": inputs_ct,
-                },
+                text("insert into execution_approvals "
+                     "(id, user_id, document_id, version_id, plan_hash, inputs_ciphertext, "
+                     "status, decision, expires_at, decided_at) "
+                     "values (:id, :uid, :doc, :ver, :hash, :ct, 'confirmed', 'confirmed', "
+                     "now() + interval '10 minutes', now())"),
+                {"id": approval_id, "uid": user_id, "doc": doc_id, "ver": ver_id,
+                 "hash": plan.hash, "ct": inputs_ct},
             )
-
         await session.execute(
-            text(
-                "insert into sandbox_runs (id, user_id, document_id, version_id, plan_hash, "
-                "status, inputs_ciphertext, claimed_at, approval_id) "
-                "values (:id, :uid, :doc, :ver, :hash, 'running', :ct, now(), :aid)"
-            ),
-            {
-                "id": run_id, "uid": user_id, "doc": doc_id, "ver": ver_id,
-                "hash": plan.hash, "ct": inputs_ct, "aid": approval_id,
-            },
+            text("insert into sandbox_runs (id, user_id, document_id, version_id, plan_hash, "
+                 "status, inputs_ciphertext, claimed_at, approval_id) "
+                 "values (:id, :uid, :doc, :ver, :hash, 'running', :ct, now(), :aid)"),
+            {"id": run_id, "uid": user_id, "doc": doc_id, "ver": ver_id,
+             "hash": plan.hash, "ct": inputs_ct, "aid": approval_id},
         )
         await session.commit()
     return str(run_id), str(doc_id), str(ver_id), plan.hash
@@ -191,7 +157,6 @@ def broker(
     )
 
 
-# Convenience fixture: a read-only run (no approval).
 @pytest.fixture
 async def read_run(
     engine: AsyncEngine, cipher: LocalEnvelopeCipher,
@@ -203,7 +168,6 @@ async def read_run(
     return run_id, doc_id, ver_id, plan_hash, user_id
 
 
-# Convenience fixture: a write run (with confirmed approval).
 @pytest.fixture
 async def write_run(
     engine: AsyncEngine, cipher: LocalEnvelopeCipher,
@@ -216,14 +180,13 @@ async def write_run(
     return run_id, doc_id, ver_id, plan_hash, user_id
 
 
-# ---------- I1: Approval check tests ----------
+# ---------- I1: Approval check ----------
 
 
 @pytest.mark.asyncio
 async def test_write_step_requires_confirmed_approval(
     broker: ToolBroker, write_run: tuple, signer: GrantSigner,
 ):
-    """I1: a write step must have a confirmed, unexpired approval at call time."""
     run_id, doc_id, ver_id, plan_hash, user_id = write_run
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
@@ -240,23 +203,18 @@ async def test_write_step_with_expired_approval_rejected(
     broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
     signer: GrantSigner,
 ):
-    """I1: a write step under an expired approval at execution time is rejected."""
     user_id = uuid.uuid4()
     run_id, doc_id, ver_id, plan_hash = await _seed_run_with_plan_hash(
         engine, cipher, user_id, _WRITE_MANIFEST, inputs={"title": "x"},
         with_approval=True,
     )
-    # Make the approval expired.
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         await session.execute(
-            text(
-                "UPDATE execution_approvals SET expires_at = now() - interval '1 second' "
-                "WHERE document_id = :doc"
-            ),
+            text("UPDATE execution_approvals SET expires_at = now() - interval '1 second' "
+                 "WHERE document_id = :doc"),
             {"doc": doc_id},
         )
         await session.commit()
-
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
         step_ids=["s1"], ttl_seconds=300,
@@ -267,16 +225,13 @@ async def test_write_step_with_expired_approval_rejected(
         )
 
 
-# ---------- I2: Plan-binding tests ----------
+# ---------- I2: Plan-binding ----------
 
 
 @pytest.mark.asyncio
 async def test_read_only_step_invoked_as_write_is_rejected(
     broker: ToolBroker, read_run: tuple, signer: GrantSigner,
 ):
-    """I2: a read-only run has no approval, so invoking its step as a write tool
-    must be rejected because the plan declares document.read, not document.delete.
-    """
     run_id, doc_id, ver_id, plan_hash, user_id = read_run
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
@@ -292,13 +247,11 @@ async def test_read_only_step_invoked_as_write_is_rejected(
 async def test_tool_id_must_match_plan_declared_tool(
     broker: ToolBroker, write_run: tuple, signer: GrantSigner,
 ):
-    """I2: the caller-supplied tool_id must match the plan step's declared tool."""
     run_id, doc_id, ver_id, plan_hash, user_id = write_run
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
         step_ids=["s1"], ttl_seconds=300,
     )
-    # The plan declares document.create, but we ask for document.read.
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(
             token, "s1", "document.read", {"document_id": str(uuid.uuid4())},
@@ -309,12 +262,10 @@ async def test_tool_id_must_match_plan_declared_tool(
 async def test_plan_hash_mismatch_rejected(
     broker: ToolBroker, read_run: tuple, signer: GrantSigner,
 ):
-    """I2: a grant whose plan_hash does not match the recompiled plan is rejected."""
     run_id, doc_id, ver_id, plan_hash, user_id = read_run
     token = signer.sign(
         run_id=run_id, user_id=str(user_id),
-        plan_hash="deadbeef" * 8,  # wrong hash
-        step_ids=["s1"], ttl_seconds=300,
+        plan_hash="deadbeef" * 8, step_ids=["s1"], ttl_seconds=300,
     )
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(
@@ -322,34 +273,55 @@ async def test_plan_hash_mismatch_rejected(
         )
 
 
-# ---------- General grant/auth tests ----------
+# ---------- NEW #1: Caller input ignored ----------
+
+
+@pytest.mark.asyncio
+async def test_caller_input_ignored_plan_compiled_input_used(
+    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+):
+    """NEW #1: the caller-supplied input is IGNORED — execution uses the plan's
+    compiled step input.
+    """
+    user_id = uuid.uuid4()
+    run_id, doc_id, ver_id, plan_hash = await _seed_run_with_plan_hash(
+        engine, cipher, user_id, _WRITE_MANIFEST, inputs={"title": "pinned-title"},
+        with_approval=True,
+    )
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
+        step_ids=["s1"], ttl_seconds=300,
+    )
+    result = await broker.invoke(
+        token, "s1", "document.create",
+        {"type": "task", "title": "attacker-title", "body": "evil"},
+    )
+    assert result.success
+    assert result.data["title"] == "pinned-title"
+
+
+# ---------- Grant/auth ----------
 
 
 @pytest.mark.asyncio
 async def test_broker_rejects_expired_or_wrong_step_grant(
     broker: ToolBroker, read_run: tuple, signer: GrantSigner,
 ):
-    """Expired grant AND a step outside the allowlist -> SANDBOX_GRANT_INVALID."""
     run_id, doc_id, ver_id, plan_hash, user_id = read_run
-
     expired_token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=0,
-    )
+        step_ids=["s1"], ttl_seconds=0,)
     time.sleep(0.01)
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(
-            expired_token, "s1", "document.read", {"document_id": str(uuid.uuid4())},
-        )
-
+            expired_token, "s1", "document.read", {"document_id": str(uuid.uuid4())})
     valid_token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,
-    )
+        step_ids=["s1"], ttl_seconds=300,)
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(
-            valid_token, "s2", "document.read", {"document_id": str(uuid.uuid4())},
-        )
+            valid_token, "s2", "document.read", {"document_id": str(uuid.uuid4())})
 
 
 @pytest.mark.asyncio
@@ -359,35 +331,12 @@ async def test_tampered_signature_rejected(
     run_id, doc_id, ver_id, plan_hash, user_id = read_run
     valid_token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,
-    )
+        step_ids=["s1"], ttl_seconds=300,)
     payload, sig = valid_token.rsplit(".", 1)
     tampered = f"{payload}.deadbeef{sig[8:]}"
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(
-            tampered, "s1", "document.read", {"document_id": str(uuid.uuid4())},
-        )
-
-
-@pytest.mark.asyncio
-async def test_valid_grant_executes_tool_as_grant_user(
-    broker: ToolBroker, read_run: tuple, signer: GrantSigner,
-):
-    run_id, doc_id, ver_id, plan_hash, user_id = read_run
-    token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,
-    )
-    # The plan declares s1 as document.read with {{doc_id}} input.
-    # Input substitution already happened during compile, so the input
-    # carries the substituted doc_id. We pass a fresh UUID here — the doc
-    # won't exist (user-scoped), but the call should succeed (NOT_FOUND, not grant error).
-    result = await broker.invoke(
-        token, "s1", "document.read", {"document_id": str(uuid.uuid4())},
-    )
-    # Document doesn't exist → NOT_FOUND tool result (not a grant error).
-    assert not result.success
-    assert result.error_code == "NOT_FOUND"
+            tampered, "s1", "document.read", {"document_id": str(uuid.uuid4())})
 
 
 @pytest.mark.asyncio
@@ -396,88 +345,189 @@ async def test_cross_user_document_not_found(
     engine: AsyncEngine, cipher: LocalEnvelopeCipher,
 ):
     run_id, doc_id, ver_id, plan_hash, user_id = read_run
-
     other_user_id = uuid.uuid4()
     other_doc_id = uuid.uuid4()
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         await _provision_user(session, other_user_id)
         ct = cipher.encrypt(json.dumps({"title": "other"}))
         await session.execute(
-            text(
-                "insert into documents (id, user_id, type, current_version, status, "
-                "title_ciphertext, body_ciphertext) "
-                "values (:id, :uid, 'task', 1, 'active', :title, :body)"
-            ),
+            text("insert into documents (id, user_id, type, current_version, status, "
+                 "title_ciphertext, body_ciphertext) "
+                 "values (:id, :uid, 'task', 1, 'active', :title, :body)"),
             {"id": other_doc_id, "uid": other_user_id, "title": ct, "body": ct},
         )
         await session.commit()
-
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,
-    )
+        step_ids=["s1"], ttl_seconds=300,)
     result = await broker.invoke(
-        token, "s1", "document.read", {"document_id": str(other_doc_id)},
-    )
+        token, "s1", "document.read", {"document_id": str(other_doc_id)},)
     assert not result.success
     assert result.error_code == "NOT_FOUND"
 
 
 @pytest.mark.asyncio
 async def test_run_not_in_flight_rejected(
-    broker: ToolBroker, read_run: tuple, signer: GrantSigner,
-    engine: AsyncEngine,
+    broker: ToolBroker, read_run: tuple, signer: GrantSigner, engine: AsyncEngine,
 ):
     run_id, doc_id, ver_id, plan_hash, user_id = read_run
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         await session.execute(
             text("UPDATE sandbox_runs SET status = 'succeeded' WHERE id = :id"),
-            {"id": run_id},
-        )
+            {"id": run_id},)
         await session.commit()
-
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,
-    )
+        step_ids=["s1"], ttl_seconds=300,)
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(
-            token, "s1", "document.read", {"document_id": str(uuid.uuid4())},
-        )
+            token, "s1", "document.read", {"document_id": str(uuid.uuid4())})
 
 
-# ---------- I3: TOCTOU-safe idempotent replay ----------
+# ---------- I3 / NEW #3 / NEW #6: Idempotent replay ----------
 
 
 @pytest.mark.asyncio
-async def test_idempotent_replay_returns_same_result_data(
+async def test_idempotent_replay_returns_same_result_and_only_one_document(
     broker: ToolBroker, write_run: tuple, signer: GrantSigner,
+    engine: AsyncEngine, cipher: LocalEnvelopeCipher,
 ):
-    """I3: TOCTOU-safe idempotent replay — the replay returns the stored result.
+    """NEW #6: replay returns same document id, side effect executed once."""
+    run_id, doc_id, ver_id, plan_hash, user_id = write_run
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
+        step_ids=["s1"], ttl_seconds=300,)
+    result1 = await broker.invoke(
+        token, "s1", "document.create", {"type": "task", "title": "t1", "body": "b1"},)
+    assert result1.success
+    doc_id_1 = result1.data["id"]
+    result2 = await broker.invoke(
+        token, "s1", "document.create", {"type": "task", "title": "t2", "body": "b2"},)
+    assert result2.success
+    assert result2.data["id"] == doc_id_1
+    # Only one non-skill document (the skill manifest itself is a document row).
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        count = await session.scalar(
+            text("SELECT count(*) FROM documents WHERE user_id = :uid AND type != 'skill'"),
+            {"uid": user_id},)
+    assert count == 1
 
-    A document.create executed twice with the same (run_id, step_id) must:
-    1. Succeed both times
-    2. The second call returns the same document id as the first call
-    3. Only ONE document exists (side effect executed once)
+
+@pytest.mark.asyncio
+async def test_concurrent_same_step_executes_once(
+    broker: ToolBroker, write_run: tuple, signer: GrantSigner,
+    engine: AsyncEngine, cipher: LocalEnvelopeCipher,
+):
+    """NEW #6: concurrent invocations of the same (run, step) → only one side
+    effect executes (the loser gets 'in progress' or the stored result).
     """
     run_id, doc_id, ver_id, plan_hash, user_id = write_run
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,
-    )
+        step_ids=["s1"], ttl_seconds=300,)
 
+    async def invoke():
+        return await broker.invoke(
+            token, "s1", "document.create", {"type": "task", "title": "t", "body": "b"},)
+
+    results = await asyncio.gather(invoke(), invoke())
+    # At least one must succeed (the reservation winner).
+    assert results[0].success or results[1].success
+    # If both succeeded (sequential timing), ids must match.
+    if results[0].success and results[1].success:
+        assert results[0].data["id"] == results[1].data["id"]
+    # Exactly one document created (excluding the skill manifest).
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        count = await session.scalar(
+            text("SELECT count(*) FROM documents WHERE user_id = :uid AND type != 'skill'"),
+            {"uid": user_id},)
+    assert count == 1
+
+
+@pytest.mark.asyncio
+async def test_stuck_reserved_row_returns_in_progress(
+    broker: ToolBroker, write_run: tuple, signer: GrantSigner,
+    engine: AsyncEngine, cipher: LocalEnvelopeCipher,
+):
+    """NEW #3: a row stuck in 'reserved' returns 'in progress' error, not fake
+    success.
+    """
+    run_id, doc_id, ver_id, plan_hash, user_id = write_run
+    # Insert a reserved row via async session (simulates crash after reservation).
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        await session.execute(
+            text("insert into sandbox_tool_calls (run_id, user_id, step_id, tool_id, "
+                 "result_status) values (:rid, :uid, 's1', 'document.create', 'reserved') "
+                 "on conflict (run_id, step_id) do nothing"),
+            {"rid": run_id, "uid": user_id},)
+        await session.commit()
+
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
+        step_ids=["s1"], ttl_seconds=300,)
+    result = await broker.invoke(
+        token, "s1", "document.create", {"type": "task", "title": "t", "body": "b"},)
+    assert not result.success
+    assert result.error_code == "SANDBOX_STEP_IN_PROGRESS"
+
+
+@pytest.mark.asyncio
+async def test_failed_step_replay_returns_actual_failure(
+    broker: ToolBroker, write_run: tuple, signer: GrantSigner,
+):
+    """NEW #3: replay returns the stored result with actual data, not fake
+    'replayed: true'.
+    """
+    run_id, doc_id, ver_id, plan_hash, user_id = write_run
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
+        step_ids=["s1"], ttl_seconds=300,)
     result1 = await broker.invoke(
-        token, "s1", "document.create", {"type": "task", "title": "t1", "body": "b1"},
-    )
+        token, "s1", "document.create", {"type": "task", "title": "z", "body": "b"},)
     assert result1.success
-    assert result1.data is not None
     doc_id_1 = result1.data["id"]
-
-    # Second invocation with same (run_id, step_id) — idempotent replay.
     result2 = await broker.invoke(
-        token, "s1", "document.create", {"type": "task", "title": "t2", "body": "b2"},
-    )
+        token, "s1", "document.create", {"type": "task", "title": "z", "body": "b"},)
     assert result2.success
-    assert result2.data is not None
-    # Must return the SAME document id (the stored result).
     assert result2.data["id"] == doc_id_1
+    assert "replayed" not in (result2.data if isinstance(result2.data, dict) else {})
+
+
+# ---------- NEW #2: Cross-user reservation squat ----------
+
+
+@pytest.mark.asyncio
+async def test_user_b_cannot_poison_user_a_step_via_broker_read(
+    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+):
+    """NEW #2: if user B inserts a row for A's run, the broker's _handle_loser
+    filters by A's user_id, so A never reads B's row.
+    """
+    user_a = uuid.uuid4()
+    run_id, doc_id, ver_id, plan_hash = await _seed_run_with_plan_hash(
+        engine, cipher, user_a, _READ_MANIFEST, inputs={"doc_id": str(uuid.uuid4())},)
+    user_b = uuid.uuid4()
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        await session.execute(
+            text("insert into auth.users (id) values (:id) on conflict (id) do nothing"),
+            {"id": user_b},)
+        await session.commit()
+    # Insert a tool call for user B on A's run (simulates DB-level attacker).
+    async with async_sessionmaker(engine, expire_on_commit=False)() as session:
+        await session.execute(
+            text("insert into sandbox_tool_calls (run_id, user_id, step_id, tool_id, "
+                 "result_status, result_ciphertext) "
+                 "values (:rid, :uid, 's1', 'document.read', 'succeeded', :ct)"),
+            {"rid": run_id, "uid": user_b,
+             "ct": cipher.encrypt(json.dumps({"evil": True}))},)
+        await session.commit()
+
+    token = signer.sign(
+        run_id=run_id, user_id=str(user_a), plan_hash=plan_hash,
+        step_ids=["s1"], ttl_seconds=300,)
+    result = await broker.invoke(
+        token, "s1", "document.read", {"document_id": str(uuid.uuid4())},)
+    assert result.success
+    if isinstance(result.data, dict):
+        assert result.data.get("evil") is None

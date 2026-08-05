@@ -54,29 +54,53 @@ _NON_GLOBAL_NETS = [
     # IPv4-mapped-IPv6: the IPv4 address embedded in ::ffff:x.x.x.x is checked
     # separately via ipv4_mapped below; listing ::ffff:0:0/96 here would reject
     # ALL mapped addresses including public ones, so we check per-address.
+    #
+    # IPv4-compatible-IPv6 (::/96, excluding ::/128 which is already listed):
+    # addresses like ::127.0.0.1 embed an IPv4 address too, but ipv4_mapped is
+    # None for these — ipaddress calls them "IPv4-compatible". We reject the
+    # entire ::/96 range (minus ::1/128 which is already covered) because the
+    # embedded v4 is checked per-address below.
+    ipaddress.IPv6Network("::/96"),             # IPv4-compatible (checked per-addr)
 ]
 
 
 def _is_global(addr: str) -> bool:
     """True when an address is globally routable (not loopback/private/link-local).
 
-    IPv4-mapped-IPv6 addresses (``::ffff:x.x.x.x``) have their embedded IPv4
-    portion checked — a mapped private v4 is non-global.
+    IPv4-mapped-IPv6 (::ffff:x.x.x.x → ipv4_mapped) and IPv4-compatible-IPv6
+    (::x.x.x.x → ipv4_mapped is None but the address is in ::/96) both have
+    their embedded IPv4 portion checked.
     """
     try:
         ip = ipaddress.ip_address(addr)
     except ValueError:
         return False
 
-    # IPv4-mapped-IPv6: extract the embedded IPv4 address and check that.
-    # ipaddress represents these as IPv6Address with ipv4_mapped not None.
-    if isinstance(ip, ipaddress.IPv6Address) and ip.ipv4_mapped is not None:
-        return _is_global(str(ip.ipv4_mapped))
+    if isinstance(ip, ipaddress.IPv6Address):
+        # IPv4-mapped-IPv6: the canonical way py 3.x exposes ::ffff:x.x.x.x.
+        if ip.ipv4_mapped is not None:
+            return _is_global(str(ip.ipv4_mapped))
+        # IPv4-compatible-IPv6: ::x.x.x.x (::/96). ipv4_mapped is None for
+        # these; extract the last 32 bits as an IPv4 address.
+        if _is_ipv4_compatible(ip):
+            embedded = str(ipaddress.IPv4Address(ip.packed[-4:]))
+            return _is_global(embedded)
 
     for net in _NON_GLOBAL_NETS:
         if ip in net:
             return False
     return True
+
+
+def _is_ipv4_compatible(ip: ipaddress.IPv6Address) -> bool:
+    """True when an IPv6 address is an IPv4-compatible address (::/96).
+
+    An IPv4-compatible address has the form ::x.x.x.x — the upper 96 bits
+    are zero and it is NOT the unspecified address (::).
+    """
+    if ip == ipaddress.IPv6Address("::"):
+        return False
+    return ip.packed[:12] == b"\x00" * 12
 
 
 def _resolve_all(hostname: str) -> list[str]:

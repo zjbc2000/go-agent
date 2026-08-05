@@ -135,6 +135,18 @@ def test_grant_token_in_env_not_cmdline():
     assert config.environment.get("AGENT_TOOL_GRANT_TOKEN") == "secret-grant-123"
 
 
+def test_container_nonzero_exit_raises_runtime_error():
+    """NEW #4: ContainerRuntime must check the runner's exit code — non-zero
+    means the container failed and should raise RuntimeError, never silently
+    succeed.
+    """
+    runner = FakeContainerRunner(exit_code=1)
+    signer = FakeGrantSigner()
+    runtime = ContainerRuntime(runner=runner, grant_signer=signer, broker_url="http://broker:8000")
+    with pytest.raises(RuntimeError, match="Container exited with code 1"):
+        runtime.execute(_make_plan(), str(uuid.uuid4()), str(uuid.uuid4()))
+
+
 def test_hash_drift_refuses_execution():
     """T2 M2 fix: a plan whose hash doesn't match its re-derived hash is refused."""
     from app.skills.schemas import CompiledStep, ExecutionPlan

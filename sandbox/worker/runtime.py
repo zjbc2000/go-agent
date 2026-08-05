@@ -141,7 +141,14 @@ class ContainerRuntime:
                 "AGENT_TOOL_GRANT_TOKEN": grant_token,
             },
         )
-        self._runner.run(config)
+        result = self._runner.run(config)
+
+        # NEW #4: check the runner's exit code — never mark succeeded when
+        # the container failed or nothing ran.
+        if result.exit_code != 0:
+            raise RuntimeError(
+                f"Container exited with code {result.exit_code}: {result.stderr}"
+            )
 
 
 def _rehash_plan(plan: ExecutionPlan) -> str:

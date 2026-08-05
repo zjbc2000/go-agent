@@ -28,10 +28,11 @@ describe("MockChatRepository", () => {
     expect(session.id).toMatch(/^sess_/);
   });
 
-  it("sendMessage returns async iterable", async () => {
-    const stream = repo.sendMessage("sess_1", "测试消息", "req_test");
+  it("createRun returns a run with a streaming event iterable", async () => {
+    const run = await repo.createRun("sess_1", "测试消息", "req_test");
+    expect(run.runId).toMatch(/^run_/);
     const events: unknown[] = [];
-    for await (const event of stream) {
+    for await (const event of run.events) {
       events.push(event);
     }
     expect(events.length).toBeGreaterThan(0);

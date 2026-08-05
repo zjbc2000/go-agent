@@ -34,6 +34,38 @@ export type ChatEvent =
   | { type: "done"; messageId: string }
   | { type: "error"; code: string; message: string };
 
+// --- Chat runs (durable SSE run-first contract) ---
+
+/** A stream of chat events plus the SSE Last-Event-ID cursor advanced as it is consumed. */
+export interface RunStream {
+  events: AsyncIterable<ChatEvent>;
+  /** Current SSE cursor; undefined until the first frame with an id is read. */
+  lastEventId: () => string | undefined;
+}
+
+/** A run created (or resumed) by POSTing to the run endpoint. */
+export interface CreatedRun extends RunStream {
+  runId: string;
+}
+
+/** Context needed to resume an interrupted run on the server. */
+export interface RunStreamOptions {
+  sessionId: string;
+  content: string;
+  idempotencyKey: string;
+  lastEventId?: string;
+  signal?: AbortSignal;
+}
+
+export type RunStatus = "streaming" | "completed" | "error";
+
+/** A point-in-time reconstruction of a run from its persisted event replay. */
+export interface RunSnapshot {
+  runId: string;
+  status: RunStatus;
+  content: string;
+}
+
 // --- Planning ---
 
 export type PlanningCategory = "all" | "memory" | "interest" | "task" | "skill";

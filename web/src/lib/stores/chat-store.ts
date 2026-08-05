@@ -7,6 +7,14 @@ import type { ChatState, Message, PlanDraft, Session } from "@/lib/domain/types"
 import type { ChatRepository } from "@/lib/domain/repositories";
 import { generateRequestId } from "@/lib/utils/id";
 
+/** Per-session context needed to resume an interrupted run server-side. */
+export interface RunState {
+  runId: string;
+  content: string;
+  idempotencyKey: string;
+  lastEventId?: string;
+}
+
 interface ChatStore {
   // Sessions
   sessions: Session[];
@@ -24,6 +32,13 @@ interface ChatStore {
   chatState: ChatState;
   setChatState: (state: ChatState) => void;
   currentAssistantMessageId: string | null;
+
+  // Run state (per-session, for resuming interrupted runs)
+  runStates: Record<string, RunState>;
+  startRun: (sessionId: string, run: { runId: string; content: string; idempotencyKey: string }) => void;
+  updateRunCursor: (sessionId: string, lastEventId: string) => void;
+  clearRunState: (sessionId: string) => void;
+  getRunState: (sessionId: string) => RunState | undefined;
 
   // Drafts (pending plan cards in chat)
   drafts: PlanDraft[];
@@ -85,6 +100,35 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   currentAssistantMessageId: null,
+
+  runStates: {},
+
+  startRun(sessionId: string, run: { runId: string; content: string; idempotencyKey: string }) {
+    set((s) => ({
+      runStates: { ...s.runStates, [sessionId]: { ...run, lastEventId: undefined } },
+    }));
+  },
+
+  updateRunCursor(sessionId: string, lastEventId: string) {
+    set((s) => {
+      const current = s.runStates[sessionId];
+      if (!current) return {};
+      return { runStates: { ...s.runStates, [sessionId]: { ...current, lastEventId } } };
+    });
+  },
+
+  clearRunState(sessionId: string) {
+    set((s) => {
+      if (!s.runStates[sessionId]) return {};
+      const runStates = { ...s.runStates };
+      delete runStates[sessionId];
+      return { runStates };
+    });
+  },
+
+  getRunState(sessionId: string): RunState | undefined {
+    return get().runStates[sessionId];
+  },
 
   drafts: [],
 

@@ -5,12 +5,15 @@
 
 import type {
   ApprovalDecision,
-  ChatEvent,
+  CreatedRun,
   DocumentVersion,
   Message,
   PlanningDocument,
   PlanningFilter,
   PlanDraft,
+  RunSnapshot,
+  RunStream,
+  RunStreamOptions,
   Session,
   UpdateDocumentInput,
   User,
@@ -29,12 +32,30 @@ export interface AuthRepository {
 export interface ChatRepository {
   listSessions(): Promise<Session[]>;
   getMessages(sessionId: string): Promise<Message[]>;
-  sendMessage(
+
+  /**
+   * Create (or resume) a run and stream its events.
+   *
+   * POSTs the run with the given idempotency key, reads the `run.started` frame to
+   * learn the durable `runId`, and exposes the live stream from that point onward.
+   */
+  createRun(
     sessionId: string,
     content: string,
-    requestId: string,
-  ): AsyncIterable<ChatEvent>;
-  stopGeneration(messageId: string): Promise<void>;
+    idempotencyKey: string,
+    options?: { signal?: AbortSignal },
+  ): Promise<CreatedRun>;
+
+  /**
+   * Resume an interrupted run. Re-POSTs the SAME session + idempotency key with a
+   * `Last-Event-ID` cursor, so the server resumes the existing run's live generation
+   * without creating a second user message.
+   */
+  subscribeRunEvents(options: RunStreamOptions): RunStream;
+
+  /** Reconstruct a run's current status and text from its persisted event replay. */
+  getRun(runId: string): Promise<RunSnapshot | null>;
+
   createSession(): Promise<Session>;
 }
 

@@ -4,7 +4,11 @@
 
 import type {
   ChatEvent,
+  CreatedRun,
   Message,
+  RunSnapshot,
+  RunStream,
+  RunStreamOptions,
   Session,
 } from "@/lib/domain/types";
 import type { ChatRepository } from "@/lib/domain/repositories";
@@ -74,16 +78,9 @@ function delay(ms: number): Promise<void> {
   return new Promise((r) => setTimeout(r, ms));
 }
 
-async function* simulateStream(content: string, messageId: string): AsyncIterable<ChatEvent> {
-  yield { type: "message-start", messageId };
-
-  const tokens = content.split("");
-  for (let i = 0; i < tokens.length; i += 2) {
-    await delay(30 + Math.random() * 40);
-    yield { type: "token", messageId, text: tokens.slice(i, i + 2).join("") };
-  }
-
-  yield { type: "done", messageId };
+function pickResponse(content: string): string {
+  if (content.includes("规划") || content.includes("计划")) return MOCK_RESPONSES.plan;
+  return MOCK_RESPONSES.default;
 }
 
 // Predefined assistant responses for mock
@@ -107,11 +104,7 @@ export function createMockChatRepository(): ChatRepository {
       return [...(messages[sessionId] ?? [])];
     },
 
-    sendMessage(
-      sessionId: string,
-      content: string,
-      requestId: string,
-    ): AsyncIterable<ChatEvent> {
+    async createRun(sessionId: string, content: string): Promise<CreatedRun> {
       const userMsg: Message = {
         id: `msg_${generateId("u")}`,
         sessionId,
@@ -134,9 +127,8 @@ export function createMockChatRepository(): ChatRepository {
       );
 
       const assistantMsgId = `msg_${generateId("a")}`;
-      const responseText = content.includes("规划") || content.includes("计划")
-        ? MOCK_RESPONSES.plan
-        : MOCK_RESPONSES.default;
+      const runId = `run_${generateId("r")}`;
+      const responseText = pickResponse(content);
 
       const assistantMsg: Message = {
         id: assistantMsgId,
@@ -147,10 +139,23 @@ export function createMockChatRepository(): ChatRepository {
         createdAt: new Date().toISOString(),
       };
 
-      async function* wrapStream(): AsyncGenerator<ChatEvent> {
-        for await (const event of simulateStream(responseText, assistantMsgId)) {
-          yield event;
+      let seq = 0;
+      let lastEventId: string | undefined;
+
+      async function* events(): AsyncGenerator<ChatEvent> {
+        lastEventId = String(++seq);
+        yield { type: "message-start", messageId: assistantMsgId };
+
+        const tokens = responseText.split("");
+        for (let i = 0; i < tokens.length; i += 2) {
+          await delay(30 + Math.random() * 40);
+          lastEventId = String(++seq);
+          yield { type: "token", messageId: assistantMsgId, text: tokens.slice(i, i + 2).join("") };
         }
+
+        lastEventId = String(++seq);
+        yield { type: "done", messageId: assistantMsgId };
+
         // Persist final message
         messages[sessionId] = [
           ...messages[sessionId],
@@ -158,11 +163,19 @@ export function createMockChatRepository(): ChatRepository {
         ];
       }
 
-      return wrapStream();
+      return { runId, events: events(), lastEventId: () => lastEventId };
     },
 
-    async stopGeneration(_messageId: string): Promise<void> {
-      // In mock, just mark as completed
+    subscribeRunEvents(options: RunStreamOptions): RunStream {
+      // Mock streams never interrupt, so there is nothing to resume.
+      async function* empty(): AsyncGenerator<ChatEvent> {
+        // no events
+      }
+      return { events: empty(), lastEventId: () => options.lastEventId };
+    },
+
+    async getRun(runId: string): Promise<RunSnapshot | null> {
+      return { runId, status: "completed", content: "" };
     },
 
     async createSession(): Promise<Session> {

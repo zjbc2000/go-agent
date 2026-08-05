@@ -14,7 +14,10 @@ from app.core.errors import ApiError, api_error_handler
 from app.planning.router import router as planning_router
 from app.planning.service import PlanningService
 from app.repositories.chat import ChatRepository
+from app.repositories.execution import ExecutionRepository
 from app.repositories.planning import DocumentRepository
+from app.skills.router import router as skills_router
+from app.skills.service import SkillService
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -38,13 +41,21 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         cipher=cipher,
         chat=service,
     )
+    execution_repository = ExecutionRepository(session_factory=session_factory, cipher=cipher)
+    skill_service = SkillService(
+        documents=planning_repository,
+        execution=execution_repository,
+        cipher=cipher,
+    )
 
     app.state.settings = settings
     app.state.chat_service = service
     app.state.planning_service = planning_service
     app.state.planning_repository = planning_repository
+    app.state.skill_service = skill_service
     app.include_router(chat_router)
     app.include_router(planning_router)
+    app.include_router(skills_router)
     return app
 
 

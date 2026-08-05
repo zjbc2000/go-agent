@@ -9,7 +9,7 @@ __pycache__/
 
 # Env / secrets (opt-in .env.example)
 .env
-.env.*
+
 
 # Test artifacts
 coverage/
@@ -25,3 +25,5 @@ web/.next/
 
 # OS
 .DS_Store
+
+docs/reference

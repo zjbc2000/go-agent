@@ -4,7 +4,8 @@
 // ============================================================
 
 import type {
-  ApprovalDecision,
+  ApprovalDecisionInput,
+  ApprovalResult,
   CreatedRun,
   DocumentVersion,
   Message,
@@ -67,7 +68,7 @@ export interface PlanningRepository {
     id: string,
     input: UpdateDocumentInput,
   ): Promise<PlanningDocument>;
-  decideApproval(id: string, decision: ApprovalDecision): Promise<void>;
+  decideApproval(input: ApprovalDecisionInput): Promise<ApprovalResult>;
   listVersions(documentId: string): Promise<DocumentVersion[]>;
   restoreVersion(documentId: string, versionId: string): Promise<void>;
 }

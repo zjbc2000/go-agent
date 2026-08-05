@@ -4,7 +4,8 @@
 
 import type { PlanningRepository } from "@/lib/domain/repositories";
 import type {
-  ApprovalDecision,
+  ApprovalDecisionInput,
+  ApprovalResult,
   DocumentVersion,
   PlanningDocument,
   PlanningFilter,
@@ -152,9 +153,40 @@ export function createMockPlanningRepository(): PlanningRepository {
       return updated;
     },
 
-    async decideApproval(_id: string, _decision: ApprovalDecision): Promise<void> {
+    async decideApproval(input: ApprovalDecisionInput): Promise<ApprovalResult> {
       await delay(100);
-      // In mock, just accept. Real implementation would move draft → document.
+      if (input.decision === "confirm") {
+        const title = input.editedPayload?.title ?? "新规划文档";
+        const content = input.editedPayload?.content ?? "新规划文档内容";
+        const document: PlanningDocument = {
+          id: `doc_${generateId("d")}`,
+          title,
+          content,
+          category: "task",
+          version: 1,
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        };
+        documents = [document, ...documents];
+        return {
+          approvalId: input.approvalId,
+          decision: "confirmed",
+          version: 1,
+          originalPayload: { title, content, category: "task" },
+          document: {
+            id: document.id,
+            title,
+            content,
+            category: "task",
+            version: 1,
+          },
+        };
+      }
+      if (input.decision === "reject") {
+        return { approvalId: input.approvalId, decision: "rejected", version: null };
+      }
+      // Regenerate: the proposal is sent back; the list is left unchanged.
+      return { approvalId: input.approvalId, decision: "superseded", version: null };
     },
 
     async listVersions(documentId: string): Promise<DocumentVersion[]> {

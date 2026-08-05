@@ -87,7 +87,8 @@ export type PlanDraftStatus =
   | "saving"
   | "confirmed"
   | "rejected"
-  | "regenerating";
+  | "regenerating"
+  | "expired";
 
 export interface PlanningDocument {
   id: string;
@@ -110,6 +111,27 @@ export interface DocumentVersion {
 }
 
 export type ApprovalDecision = "confirm" | "reject" | "regenerate";
+
+export interface ApprovalDecisionInput {
+  approvalId: string;
+  decision: ApprovalDecision;
+  editedPayload?: { title: string; content: string };
+  idempotencyKey: string;
+}
+
+export interface ApprovalResult {
+  approvalId: string;
+  decision: string;
+  version: number | null;
+  originalPayload?: { title: string; content: string; category: string };
+  document?: {
+    id: string;
+    title: string;
+    content: string;
+    category: Exclude<PlanningCategory, "all">;
+    version: number;
+  };
+}
 
 export interface UpdateDocumentInput {
   title?: string;

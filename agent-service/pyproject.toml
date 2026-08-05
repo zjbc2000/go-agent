@@ -17,6 +17,7 @@ dependencies = [
     "sqlalchemy[asyncio]>=2",
     "asyncpg>=0.31.0",
     "aio-pika>=9.4",
+    "jsonschema>=4.23",
 ]
 
 [dependency-groups]
@@ -43,6 +44,10 @@ select = ["E", "F", "I", "UP"]
 [tool.mypy]
 python_version = "3.11"
 packages = ["app"]
+
+[[tool.mypy.overrides]]
+module = "jsonschema.*"
+ignore_missing_imports = true
 
 [tool.hatch.build.targets.wheel]
 packages = ["app"]

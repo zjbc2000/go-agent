@@ -1,0 +1,25 @@
+{
+  "schema_version": 1,
+  "name": "example-readonly",
+  "image": "oci://example/readonly@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+  "provenance": "Built for go-agent mvp mcp registry tests. Not a real image.",
+  "sbom": "python:3.12-slim base; server.py; no additional packages.",
+  "tools": [
+    {
+      "tool_id": "echo.readonly",
+      "mutable": false,
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "message": { "type": "string" }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "echo": { "type": "string" }
+        }
+      }
+    }
+  ]
+}

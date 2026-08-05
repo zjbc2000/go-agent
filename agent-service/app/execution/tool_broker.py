@@ -16,6 +16,12 @@ the encrypted result in a try/finally so that a crash or failure still persists
 a final state (never leaves a stuck "reserved" row). The loser path distinguishes
 "reserved" (still in-progress → retryable error) from a finalized row (→ returns
 the stored result).
+
+Task 4: The broker is the SINGLE MCP mediation point. For MCP tool steps it
+validates the server is enabled + the tool is enabled (MCP_TOOL_DISABLED),
+re-checks the approval for mutable MCP steps (NEW #7), dispatches through an
+injectable McpExecutor, and validates the untrusted output against the
+registered output_schema.
 """
 
 from __future__ import annotations
@@ -24,7 +30,7 @@ import json
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from sqlalchemy import select, update
 from sqlalchemy.dialects.postgresql import insert
@@ -42,6 +48,11 @@ from app.models.planning import DocumentVersion as DocumentVersionRecord
 from app.repositories.planning import DocumentRepository, DocumentType
 from app.skills.compiler import WRITE_TOOLS, compile_skill
 from app.skills.schemas import ExecutionPlan
+
+if TYPE_CHECKING:
+    from app.mcp.executor import McpExecutor
+    from app.mcp.registry import McpRegistry
+    from app.mcp.validator import McpValidator
 
 _IN_FLIGHT_STATUSES = frozenset({"running"})
 
@@ -69,11 +80,17 @@ class ToolBroker:
         documents: DocumentRepository,
         cipher: EnvelopeCipher,
         grant_verifier: GrantVerifier,
+        mcp_registry: McpRegistry | None = None,
+        mcp_executor: McpExecutor | None = None,
+        mcp_validator: McpValidator | None = None,
     ) -> None:
         self._session_factory = session_factory
         self._documents = documents
         self._cipher = cipher
         self._grant_verifier = grant_verifier
+        self._mcp_registry = mcp_registry
+        self._mcp_executor = mcp_executor
+        self._mcp_validator = mcp_validator
 
     async def invoke(
         self, grant_token: str, step_id: str, tool_id: str, input: dict[str, Any]
@@ -103,9 +120,14 @@ class ToolBroker:
         plan = await self._recompile_and_verify(run, grant.plan_hash)
         step_tool, step_input = self._resolve_step(plan, step_id, tool_id)
 
-        # 4. Approval check for write/delete steps.
+        # 4. Approval check for write/delete steps + mutable MCP tools (NEW #7).
         if step_tool in WRITE_TOOLS:
             await self._verify_approval(run)
+        elif self._mcp_registry is not None:
+            if await self._mcp_registry.is_tool_mutable(
+                uuid.UUID(grant.user_id), step_tool,
+            ):
+                await self._verify_approval(run)
 
         # 5. User-scoped context.
         user_id = uuid.UUID(grant.user_id)
@@ -341,9 +363,59 @@ class ToolBroker:
             return await self._tool_document_update(context, input)
         elif tool_id == "document.delete":
             return await self._tool_document_delete(context, input)
+        # ---- Task 4: MCP tool dispatch ---------------------------------
+        elif self._mcp_registry is not None and self._mcp_executor is not None:
+            return await self._execute_mcp_tool(context, tool_id, input)
         else:
             return ToolResult(success=False, error_code="SANDBOX_DENIED",
                               error_message=f"Unknown tool: {tool_id!r}")
+
+    # ---- MCP tool dispatch (Task 4) ------------------------------------
+
+    async def _execute_mcp_tool(
+        self, context: RequestContext, tool_id: str, input: dict[str, Any],
+    ) -> ToolResult:
+        """Dispatch an MCP tool invocation: validate server/tool enabled,
+        execute via the injectable executor, validate output schema.
+
+        The approval re-check for mutable MCP tools already fires in
+        ``invoke()`` before this method is reached (NEW #7).
+        """
+        # 1. Verify server + tool are enabled.
+        registration = await self._mcp_registry.get_tool_registration(  # type: ignore[union-attr]
+            context.user_id, tool_id,
+        )
+        if registration is None:
+            return ToolResult(
+                success=False, error_code="MCP_TOOL_DISABLED",
+                error_message=f"MCP tool {tool_id!r} is not registered, "
+                "enabled, or the server is disabled.",
+            )
+
+        # 2. Execute via the injectable MCP executor (real or fake).
+        result = await self._mcp_executor.execute(tool_id, input)  # type: ignore[union-attr]
+
+        # 3. Validate untrusted output against the registered schema.
+        if result.success and self._mcp_validator is not None:
+            output_schema = registration.get("output_schema", {})
+            # Validate the raw untrusted output — default to {} only when the
+            # executor returned something that isn't a dict (edge case).
+            raw = result.data if isinstance(result.data, dict) else {}
+            validated = self._mcp_validator.validate_output(output_schema, raw)
+            if not validated.valid:
+                return ToolResult(
+                    success=False,
+                    error_code=validated.error_code or "VALIDATION_FAILED",
+                    error_message=validated.error_message or "Output validation failed.",
+                )
+            return ToolResult(success=True, data=validated.data)
+        # Convert executor ToolResult → broker ToolResult (distinct types).
+        return ToolResult(
+            success=result.success,
+            data=result.data,
+            error_code=result.error_code,
+            error_message=result.error_message,
+        )
 
     async def _tool_document_read(self, context: RequestContext,
                                    input: dict[str, Any]) -> ToolResult:

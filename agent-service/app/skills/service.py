@@ -6,13 +6,17 @@ manifest. ``request_execution`` loads the document user-scoped (RLS), parses and
 compiles the manifest, and records either an expiring ``execution_approvals``
 row or a queued ``sandbox_runs`` row. A repeated ``idempotency_key`` returns the
 original approval/run with no duplicate.
+
+Task 4: the service consults ``McpRegistry`` to gate ``allowed_tools`` entries —
+each must be a user-registered AND enabled MCP tool (else SKILL_INVALID). It
+also expands the write-check to cover MCP tools marked ``mutable`` (NEW #7).
 """
 
 from __future__ import annotations
 
 import json
 from datetime import UTC, datetime, timedelta
-from typing import Any
+from typing import TYPE_CHECKING, Any
 from uuid import UUID
 
 from app.core.context import RequestContext
@@ -22,6 +26,9 @@ from app.repositories.execution import ExecutionApproval, ExecutionRepository, S
 from app.repositories.planning import DocumentRepository
 from app.skills.compiler import WRITE_TOOLS, canonical_json, compile_skill
 from app.skills.schemas import ExecutionPlan, ExecutionRequestResult
+
+if TYPE_CHECKING:
+    from app.mcp.registry import McpRegistry
 
 _EXECUTION_APPROVAL_TTL = timedelta(minutes=15)
 
@@ -38,10 +45,12 @@ class SkillService:
         documents: DocumentRepository,
         execution: ExecutionRepository,
         cipher: EnvelopeCipher,
+        mcp_registry: McpRegistry | None = None,
     ) -> None:
         self._documents = documents
         self._execution = execution
         self._cipher = cipher
+        self._mcp = mcp_registry
 
     async def request_execution(
         self,
@@ -58,10 +67,16 @@ class SkillService:
             raise ApiError("NOT_FOUND", "Document not found.", False)
         if document.type != "skill":
             raise ApiError("SKILL_INVALID", "Document is not a skill.", False)
-        plan = self._compile_manifest(document.body, document.current_version_id, inputs)
+
+        # Task 4: validate allowed_tools entries against the live MCP registry.
+        manifest = self._parse_manifest_json(document.body)
+        await self._validate_allowed_tools(context, manifest)
+
+        plan = self._compile_manifest_from_dict(manifest, document.current_version_id, inputs)
         if not plan.steps:
             raise ApiError("SKILL_INVALID", "A skill must have at least one step.", False)
-        has_write = any(step.tool in WRITE_TOOLS for step in plan.steps)
+
+        has_write = await self._has_write_step(context, plan.steps)
         if has_write:
             approval = await self._request_approval(
                 context, document_id, document.current_version_id, plan, inputs, idempotency_key
@@ -95,6 +110,63 @@ class SkillService:
         if not isinstance(manifest, dict):
             raise ApiError("SKILL_INVALID", "Skill manifest must be an object.", False)
         return compile_skill(manifest, inputs, version_id=version_id)
+
+    @staticmethod
+    def _parse_manifest_json(body: str) -> dict[str, Any]:
+        try:
+            manifest = json.loads(body)
+        except (json.JSONDecodeError, TypeError):
+            raise ApiError("SKILL_INVALID", "Skill manifest is not valid JSON.", False) from None
+        if not isinstance(manifest, dict):
+            raise ApiError("SKILL_INVALID", "Skill manifest must be an object.", False)
+        return manifest
+
+    def _compile_manifest_from_dict(
+        self, manifest: dict[str, Any], version_id: UUID, inputs: dict[str, Any],
+    ) -> ExecutionPlan:
+        return compile_skill(manifest, inputs, version_id=version_id)
+
+    async def _validate_allowed_tools(
+        self, context: RequestContext, manifest: dict[str, Any],
+    ) -> None:
+        """Gate: each allowed_tools entry must be a user-registered + enabled MCP tool."""
+        allowed = manifest.get("allowed_tools", [])
+        if not isinstance(allowed, list):
+            raise ApiError("SKILL_INVALID", "allowed_tools must be a list.", False)
+        if not allowed:
+            return
+        if self._mcp is None:
+            raise ApiError(
+                "SKILL_INVALID",
+                "Manifest declares allowed_tools but MCP registry is not configured.",
+                False,
+            )
+        for tool_id in allowed:
+            if not isinstance(tool_id, str):
+                raise ApiError("SKILL_INVALID", "Each allowed_tools entry must be a string.", False)
+            if not await self._mcp.is_tool_allowed(context, tool_id):
+                raise ApiError(
+                    "SKILL_INVALID",
+                    f"allowed_tools entry {tool_id!r} is not a registered and enabled MCP tool.",
+                    False,
+                )
+
+    async def _has_write_step(
+        self, context: RequestContext, steps: list[Any],
+    ) -> bool:
+        """True when any step requires an execution approval.
+
+        Document writes + mutable MCP tools both gate on approval (NEW #7).
+        """
+        for step in steps:
+            if step.tool in WRITE_TOOLS:
+                return True
+        if self._mcp is not None:
+            for step in steps:
+                if step.tool not in WRITE_TOOLS and not step.tool.startswith("document."):
+                    if await self._mcp.is_tool_mutable(context.user_id, step.tool):
+                        return True
+        return False
 
     async def _request_approval(
         self,

@@ -513,34 +513,52 @@ async def test_crash_after_reservation_finalizes_as_failed(
     broker: ToolBroker, write_run: tuple, signer: GrantSigner,
     cipher: LocalEnvelopeCipher, engine: AsyncEngine,
 ):
-    """NEW #3 MINOR: an unexpected exception during tool execution persists a
-    'failed' final state (via try/finally), not a permanently stuck 'reserved'.
+    """Folded Task-3: NON-VACUOUS crash→failed finalization.
 
-    We first invoke normally (which succeeds and finalizes). Then we manually
-    insert a row to simulate what would happen after a crash-with-finalize:
-    the row has result_status='failed' with an error payload. A retry should
-    report that failure.
+    Force an UNEXPECTED exception during _execute_tool and verify the
+    sandbox_tool_calls row is finalized 'failed' (not stuck 'reserved').
+
+    We use monkey-patching to make _execute_tool raise mid-execution
+    for a specific step, then verify the DB row is 'failed'.
     """
     run_id, doc_id, ver_id, plan_hash, user_id = write_run
-    # First: normal invocation succeeds (reserves, executes, finalizes).
+
+    # Save the original _execute_tool.
+    original_execute = broker._execute_tool
+
+    async def _raise_after_reserve(context, tool_id, input):
+        # This is called AFTER _reserve_tool_call has reserved the row.
+        # Raising here exercises the try/finally crash path.
+        raise RuntimeError("Simulated unexpected execution crash")
+
+    # Patch _execute_tool for the broker instance.
+    broker._execute_tool = _raise_after_reserve  # type: ignore[method-assign]
+
     token = signer.sign(
         run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["s1"], ttl_seconds=300,)
-    result1 = await broker.invoke(
-        token, "s1", "document.create", {"type": "task", "title": "t", "body": "b"},)
-    assert result1.success
-    # The row is now 'succeeded'. Delete it and insert a 'failed' row to
-    # simulate a crash scenario on a different step/run.
-    # Actually, the try/finally on the winner path means even on exception,
-    # _store_tool_call_result is called with a failed ToolResult. Let me test
-    # this by verifying that after a successful call, a replayed row is NOT
-    # 'reserved' — it's 'succeeded' with ciphertext.
+        step_ids=["s1"], ttl_seconds=300,
+    )
+
+    # The exception propagates out of invoke (re-raised after finally).
+    with pytest.raises(RuntimeError, match="Simulated unexpected execution crash"):
+        await broker.invoke(
+            token, "s1", "document.create", {"type": "task", "title": "t", "body": "b"},
+        )
+
+    # Restore before DB check.
+    broker._execute_tool = original_execute  # type: ignore[method-assign]
+
+    # Verify the row is 'failed', NOT 'reserved'.
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         status = await session.scalar(
             text("SELECT result_status FROM sandbox_tool_calls "
                  "WHERE run_id = :rid AND step_id = 's1'"),
-            {"rid": run_id},)
-    assert status == "succeeded"
+            {"rid": run_id},
+        )
+    assert status == "failed", (
+        f"Expected 'failed' after crash, got {status!r} — try/finally "
+        "did not persist the failure state, row is stuck."
+    )
 
 
 # ---------- NEW #2: Cross-user reservation squat ----------

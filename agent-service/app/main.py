@@ -19,6 +19,9 @@ from app.core.errors import ApiError, api_error_handler
 from app.execution.grant import GrantVerifier
 from app.execution.publisher import AioPikaRabbitMqClient, OutboxPublisher
 from app.execution.tool_broker import ToolBroker
+from app.mcp.registry import McpRegistry
+from app.mcp.router import router as mcp_router
+from app.mcp.validator import McpValidator
 from app.planning.router import router as planning_router
 from app.planning.service import PlanningService
 from app.repositories.chat import ChatRepository
@@ -69,10 +72,13 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         chat=service,
     )
     execution_repository = ExecutionRepository(session_factory=session_factory, cipher=cipher)
+    mcp_registry = McpRegistry(session_factory=session_factory)
+    mcp_validator = McpValidator()
     skill_service = SkillService(
         documents=planning_repository,
         execution=execution_repository,
         cipher=cipher,
+        mcp_registry=mcp_registry,
     )
     publisher = OutboxPublisher(
         session_factory=session_factory,
@@ -95,11 +101,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         documents=planning_repository,
         cipher=cipher,
         grant_verifier=grant_verifier,
+        mcp_registry=mcp_registry,
+        mcp_executor=None,  # Real executor wired when Docker is available.
+        mcp_validator=mcp_validator,
     )
     app.state.tool_broker = tool_broker
+    app.state.mcp_registry = mcp_registry
     app.include_router(chat_router)
     app.include_router(planning_router)
     app.include_router(skills_router)
+    app.include_router(mcp_router)
 
     # --- Internal sandbox tool broker route ---
 

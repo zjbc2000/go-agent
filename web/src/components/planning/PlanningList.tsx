@@ -26,6 +26,7 @@ export function PlanningList() {
   }, [filter, planningRepo]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async data fetch; setState occurs after await, not synchronously
     loadDocuments();
   }, [loadDocuments]);
 

@@ -20,6 +20,7 @@ export default function SettingsPage() {
   const { user, logout } = useAuthStore();
   const [mounted, setMounted] = useState(false);
 
+  // eslint-disable-next-line react-hooks/set-state-in-effect -- intentional mounted flag to avoid SSR hydration mismatch
   useEffect(() => setMounted(true), []);
 
   const handleLogout = async () => {

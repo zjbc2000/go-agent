@@ -28,7 +28,7 @@ let sessions: Session[] = [
 ];
 
 // deno-lint-ignore no-explicit-any
-let messages: Record<string, Message[]> = {
+const messages: Record<string, Message[]> = {
   sess_1: [
     {
       id: "msg_1",

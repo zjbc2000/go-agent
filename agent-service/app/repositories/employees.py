@@ -137,9 +137,7 @@ class EmployeeRepository:
     async def list_all(self, context: RequestContext) -> list[Employee]:
         """List the caller's employees (active and inactive), newest first."""
         async with self._transaction(context) as session:
-            rows = (
-                await session.scalars(select(EmployeeRecord).order_by(EmployeeRecord.created_at.desc()))
-            ).all()
+            rows = (await session.scalars(select(EmployeeRecord).order_by(EmployeeRecord.created_at.desc()))).all()
             return [self._to_employee(row) for row in rows]
 
     async def list_active(self, context: RequestContext) -> list[Employee]:

@@ -55,9 +55,9 @@ _INTENT_PROMPT = (
     '输出形如：{"intent":"...","needs_more_info":true,"draft":{"type":"interest|task|memory|skill",'
     '"title":"...","body":"..."},"document_id":null,"employee_action":{"action":"fire|rehire|adjust_position",'
     '"employee_id":"<员工id>","position":"<新职位，仅调整岗位时填写>"}}。'
-    '当意图是 manage_employee 时输出 employee_action，employee_id 必须取自在职员工列表，不要编造；'
-    '调整岗位（adjust_position）时必须提供 position。'
-    '当信息不足无法成稿/无法确定员工时 needs_more_info 为 true 且 draft、employee_action 为 null，'
+    "当意图是 manage_employee 时输出 employee_action，employee_id 必须取自在职员工列表，不要编造；"
+    "调整岗位（adjust_position）时必须提供 position。"
+    "当信息不足无法成稿/无法确定员工时 needs_more_info 为 true 且 draft、employee_action 为 null，"
     "此时可继续提问而非成稿。不要写入正式文档。"
 )
 
@@ -265,9 +265,7 @@ def build_assistant_graph(
             text = await provider.complete(messages, json_schema=True)
             result = parse_intent(text)
             proposal = (
-                result.proposal
-                if result.proposal is not None and result.proposal.type in EMPLOYEE_DOC_TYPES
-                else None
+                result.proposal if result.proposal is not None and result.proposal.type in EMPLOYEE_DOC_TYPES else None
             )
             return {
                 "intent": result.intent,

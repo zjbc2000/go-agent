@@ -22,13 +22,13 @@ def build_employee_intent_prompt(employee: Employee) -> str:
     绝不解雇/招聘/调整其他员工。
     """
     return (
-        f'你是{employee.name}，职位是{employee.position}。请仅输出 JSON，判断用户最近一条消息的意图。'
+        f"你是{employee.name}，职位是{employee.position}。请仅输出 JSON，判断用户最近一条消息的意图。"
         '意图取值："chitchat"（闲聊/请求帮助）、"plan_interest"（用户表达新兴趣或想尝试的方向）、'
         '"manage_document"（对已有兴趣/任务/记忆文档的调整或更新）。'
         '输出形如：{"intent":"...","needs_more_info":true,"draft":{"type":"memory|interest|task",'
         '"title":"...","body":"..."},"document_id":null}。'
-        '当信息不足无法成稿时 needs_more_info 为 true 且 draft 为 null，此时可继续提问而非成稿。'
-        '不要写入正式文档，不要输出 employee_action。'
+        "当信息不足无法成稿时 needs_more_info 为 true 且 draft 为 null，此时可继续提问而非成稿。"
+        "不要写入正式文档，不要输出 employee_action。"
     )
 
 

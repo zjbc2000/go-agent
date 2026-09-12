@@ -249,7 +249,10 @@ async def test_manage_employee_creates_approval_and_waiting_approval(
     employee_repository = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee = await employee_repository.create(user_context, "李雷", "运营专员", "负责社区运营")
     chat = _build_employee_service(
-        chat_repository, planning_repository, employee_repository, cipher,
+        chat_repository,
+        planning_repository,
+        employee_repository,
+        cipher,
         complete_response=_employee_fire_response(employee.id),
     )
     events = await _collect_events(chat, user_context, owned_session, "把李雷解雇了", "k-emp-fire")
@@ -277,7 +280,10 @@ async def test_employee_approval_decision_completes_run(
     employee_repository = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee = await employee_repository.create(user_context, "李雷", "运营专员", "负责社区运营")
     chat = _build_employee_service(
-        chat_repository, planning_repository, employee_repository, cipher,
+        chat_repository,
+        planning_repository,
+        employee_repository,
+        cipher,
         complete_response=_employee_fire_response(employee.id),
     )
     events = await _collect_events(chat, user_context, owned_session, "把李雷解雇了", "k-emp-decide")
@@ -327,18 +333,14 @@ async def test_context_injection_includes_only_active_employees(
     assert fired.name not in seen[0]
 
 
-async def test_employee_session_injects_persona_and_user_docs(
-    chat_repository, cipher, user_context, db_session
-):
+async def test_employee_session_injects_persona_and_user_docs(chat_repository, cipher, user_context, db_session):
     """An employee-bound session injects the employee's persona PLUS the user's
     confirmed planning documents — never the planning-assistant SOUL or the roster."""
     planning_repository = DocumentRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee_repository = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee = await employee_repository.create(user_context, "苏曼", "秘书", "负责安排日程与会议纪要")
     await planning_repository.create_active(user_context, "interest", "已确认摄影兴趣", "每周街拍")
-    employee_session = await chat_repository.create_session(
-        user_context, "[秘书]苏曼", employee.id
-    )
+    employee_session = await chat_repository.create_session(user_context, "[秘书]苏曼", employee.id)
 
     seen: list[str] = []
     base = DeterministicProvider(delay_seconds=0.0, complete_response='{"intent": "chitchat"}')
@@ -372,17 +374,13 @@ async def test_employee_session_injects_persona_and_user_docs(
     assert "运营专员" not in prompt
 
 
-async def test_employee_session_proposes_draft_and_waits_approval(
-    chat_repository, cipher, user_context, db_session
-):
+async def test_employee_session_proposes_draft_and_waits_approval(chat_repository, cipher, user_context, db_session):
     """An employee can propose a memory/interest/task draft (HITL): the run ends in
     waiting_approval with a document.draft event, like a 苟蛋 session."""
     planning_repository = DocumentRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee_repository = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee = await employee_repository.create(user_context, "苏曼", "秘书", "负责安排日程")
-    employee_session = await chat_repository.create_session(
-        user_context, "[秘书]苏曼", employee.id
-    )
+    employee_session = await chat_repository.create_session(user_context, "[秘书]苏曼", employee.id)
     plan_response = json.dumps(
         {
             "intent": "plan_interest",
@@ -392,7 +390,10 @@ async def test_employee_session_proposes_draft_and_waits_approval(
         }
     )
     chat = _build_employee_service(
-        chat_repository, planning_repository, employee_repository, cipher,
+        chat_repository,
+        planning_repository,
+        employee_repository,
+        cipher,
         complete_response=plan_response,
     )
     events = await _collect_events(chat, user_context, employee_session.id, "帮我记一个兴趣", "k-emp-draft")
@@ -409,16 +410,12 @@ async def test_employee_session_proposes_draft_and_waits_approval(
     assert run is not None and run.status == "waiting_approval"
 
 
-async def test_employee_session_rejects_skill_proposal(
-    chat_repository, cipher, user_context, db_session
-):
+async def test_employee_session_rejects_skill_proposal(chat_repository, cipher, user_context, db_session):
     """An employee never proposes skill documents (they need a JSON manifest)."""
     planning_repository = DocumentRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee_repository = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee = await employee_repository.create(user_context, "苏曼", "秘书", "负责安排日程")
-    employee_session = await chat_repository.create_session(
-        user_context, "[秘书]苏曼", employee.id
-    )
+    employee_session = await chat_repository.create_session(user_context, "[秘书]苏曼", employee.id)
     skill_response = json.dumps(
         {
             "intent": "plan_interest",
@@ -428,7 +425,10 @@ async def test_employee_session_rejects_skill_proposal(
         }
     )
     chat = _build_employee_service(
-        chat_repository, planning_repository, employee_repository, cipher,
+        chat_repository,
+        planning_repository,
+        employee_repository,
+        cipher,
         complete_response=skill_response,
     )
     events = await _collect_events(chat, user_context, employee_session.id, "建个技能", "k-emp-skill")
@@ -438,16 +438,12 @@ async def test_employee_session_rejects_skill_proposal(
     assert "document.draft" not in kinds
 
 
-async def test_employee_session_ignores_manage_employee(
-    chat_repository, cipher, user_context, db_session
-):
+async def test_employee_session_ignores_manage_employee(chat_repository, cipher, user_context, db_session):
     """An employee never manages other employees: employee_action is always ignored."""
     planning_repository = DocumentRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee_repository = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
     employee = await employee_repository.create(user_context, "苏曼", "秘书", "负责安排日程")
-    employee_session = await chat_repository.create_session(
-        user_context, "[秘书]苏曼", employee.id
-    )
+    employee_session = await chat_repository.create_session(user_context, "[秘书]苏曼", employee.id)
     manage_response = json.dumps(
         {
             "intent": "manage_employee",
@@ -456,7 +452,10 @@ async def test_employee_session_ignores_manage_employee(
         }
     )
     chat = _build_employee_service(
-        chat_repository, planning_repository, employee_repository, cipher,
+        chat_repository,
+        planning_repository,
+        employee_repository,
+        cipher,
         complete_response=manage_response,
     )
     events = await _collect_events(chat, user_context, employee_session.id, "解雇个同事", "k-emp-mgmt")

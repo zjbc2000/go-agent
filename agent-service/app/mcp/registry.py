@@ -35,9 +35,7 @@ class McpRegistry:
 
     # ---- Registration ---------------------------------------------------
 
-    async def register_mcp(
-        self, context: RequestContext, manifest: dict[str, Any]
-    ) -> dict[str, Any]:
+    async def register_mcp(self, context: RequestContext, manifest: dict[str, Any]) -> dict[str, Any]:
         """Validate (digest, provenance, sbom) and upsert server + tools.
 
         Returns a safe dict with server id, name, and tool_ids.
@@ -50,8 +48,7 @@ class McpRegistry:
         except Exception:
             raise ApiError(
                 "MCP_DIGEST_REQUIRED",
-                "Manifest invalid: image must be oci://...@sha256:<hex64>, "
-                "provenance and sbom non-empty.",
+                "Manifest invalid: image must be oci://...@sha256:<hex64>, provenance and sbom non-empty.",
                 False,
             ) from None
 
@@ -115,9 +112,7 @@ class McpRegistry:
 
     # ---- Discovery ------------------------------------------------------
 
-    async def discover_tools(
-        self, context: RequestContext, server_id: uuid.UUID
-    ) -> list[dict[str, Any]]:
+    async def discover_tools(self, context: RequestContext, server_id: uuid.UUID) -> list[dict[str, Any]]:
         """Return the user's enabled tools for the given server.
 
         Cross-user lookups return an empty list (RLS + user-scoped session).
@@ -153,17 +148,18 @@ class McpRegistry:
 
     # ---- Allowlist / mutability lookups (for broker + service) -----------
 
-    async def is_tool_allowed(
-        self, context: RequestContext, tool_id: str
-    ) -> bool:
+    async def is_tool_allowed(self, context: RequestContext, tool_id: str) -> bool:
         """True when ``tool_id`` is a user-registered AND enabled MCP tool."""
         async with user_scoped_session(self._session_factory, context) as session:
             row = await session.scalar(
-                select(McpToolRecord).where(
+                select(McpToolRecord)
+                .where(
                     McpToolRecord.user_id == context.user_id,
                     McpToolRecord.tool_id == tool_id,
                     McpToolRecord.enabled.is_(True),
-                ).order_by(McpToolRecord.created_at.asc()).limit(1)
+                )
+                .order_by(McpToolRecord.created_at.asc())
+                .limit(1)
             )
             return row is not None
 
@@ -176,17 +172,18 @@ class McpRegistry:
         """
         async with service_session(self._session_factory) as session:
             row = await session.scalar(
-                select(McpToolRecord.mutable).where(
+                select(McpToolRecord.mutable)
+                .where(
                     McpToolRecord.user_id == user_id,
                     McpToolRecord.tool_id == tool_id,
                     McpToolRecord.enabled.is_(True),
-                ).order_by(McpToolRecord.created_at.asc()).limit(1)
+                )
+                .order_by(McpToolRecord.created_at.asc())
+                .limit(1)
             )
             return bool(row)
 
-    async def get_tool_registration(
-        self, user_id: uuid.UUID, tool_id: str
-    ) -> dict[str, Any] | None:
+    async def get_tool_registration(self, user_id: uuid.UUID, tool_id: str) -> dict[str, Any] | None:
         """Return the enabled tool row (service-scoped) for broker dispatch.
 
         Checks: server enabled AND tool enabled. Returns the tool's server
@@ -194,11 +191,14 @@ class McpRegistry:
         """
         async with service_session(self._session_factory) as session:
             row = await session.scalar(
-                select(McpToolRecord).where(
+                select(McpToolRecord)
+                .where(
                     McpToolRecord.user_id == user_id,
                     McpToolRecord.tool_id == tool_id,
                     McpToolRecord.enabled.is_(True),
-                ).order_by(McpToolRecord.created_at.asc()).limit(1)
+                )
+                .order_by(McpToolRecord.created_at.asc())
+                .limit(1)
             )
             if row is None:
                 return None

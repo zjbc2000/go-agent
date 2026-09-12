@@ -34,9 +34,7 @@ class GrantSigner:
     def __init__(self, secret: str) -> None:
         self._secret = secret.encode("utf-8")
 
-    def sign(
-        self, *, run_id: str, user_id: str, plan_hash: str, step_ids: list[str], ttl_seconds: int = 600
-    ) -> str:
+    def sign(self, *, run_id: str, user_id: str, plan_hash: str, step_ids: list[str], ttl_seconds: int = 600) -> str:
         """Return a base64-encoded grant token string."""
         payload = {
             "run_id": run_id,
@@ -45,12 +43,10 @@ class GrantSigner:
             "step_ids": step_ids,
             "exp": int(time.time()) + ttl_seconds,
         }
-        payload_b64 = base64.urlsafe_b64encode(
-            json.dumps(payload, separators=(",", ":")).encode("utf-8")
-        ).decode().rstrip("=")
-        sig = hmac.new(
-            self._secret, payload_b64.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        payload_b64 = (
+            base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode().rstrip("=")
+        )
+        sig = hmac.new(self._secret, payload_b64.encode("utf-8"), hashlib.sha256).hexdigest()
         return f"{payload_b64}.{sig}"
 
 
@@ -68,9 +64,7 @@ class GrantVerifier:
         if "." not in token:
             raise GrantInvalid("SANDBOX_GRANT_INVALID", "Malformed grant token.")
         payload_b64, sig = token.rsplit(".", 1)
-        expected_sig = hmac.new(
-            self._secret, payload_b64.encode("utf-8"), hashlib.sha256
-        ).hexdigest()
+        expected_sig = hmac.new(self._secret, payload_b64.encode("utf-8"), hashlib.sha256).hexdigest()
         if not hmac.compare_digest(expected_sig, sig):
             raise GrantInvalid("SANDBOX_GRANT_INVALID", "Grant signature is invalid.")
 
@@ -110,5 +104,6 @@ class GrantVerifier:
 @dataclass(frozen=True)
 class GrantInvalid(Exception):
     """Raised when a grant token fails verification."""
+
     code: str
     message: str

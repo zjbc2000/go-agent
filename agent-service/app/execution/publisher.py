@@ -86,9 +86,7 @@ class OutboxPublisher:
     async def publish_pending_outbox_events(self) -> int:
         """Publish every eligible pending event; return how many were published."""
         now = _utcnow()
-        events: list[dict[str, Any]] = await self._outbox.list_pending(
-            max_attempts=self._max_attempts, now=now
-        )
+        events: list[dict[str, Any]] = await self._outbox.list_pending(max_attempts=self._max_attempts, now=now)
         published = 0
         for event in events:
             run_id = event["sandbox_run_id"]

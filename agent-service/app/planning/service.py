@@ -28,6 +28,12 @@ _APPROVAL_TTL = timedelta(days=7)
 
 _VALID_TYPES: tuple[DocumentType, ...] = ("memory", "interest", "task", "skill")
 _VALID_DECISIONS: tuple[str, ...] = ("approve", "reject", "regenerate")
+_TYPE_LABELS: dict[str, str] = {
+    "memory": "记忆",
+    "interest": "兴趣",
+    "task": "任务",
+    "skill": "Skill",
+}
 
 
 def _utcnow() -> datetime:
@@ -65,9 +71,7 @@ class PlanningService:
         reconnect re-running the assistant graph) returns the existing approval.
         """
         if type not in _VALID_TYPES:
-            raise ApiError(
-                "VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False
-            )
+            raise ApiError("VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False)
         if not isinstance(title, str) or not title.strip():
             raise ApiError("VALIDATION_FAILED", "title is required.", False)
         if not isinstance(body, str) or not body.strip():
@@ -113,15 +117,11 @@ class PlanningService:
     ) -> ApprovalResult:
         """Apply an immutable approval decision with idempotency and conflict detection."""
         if decision not in _VALID_DECISIONS:
-            raise ApiError(
-                "VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False
-            )
+            raise ApiError("VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False)
         if edited_payload is not None and not (
             isinstance(edited_payload.get("title"), str) and isinstance(edited_payload.get("body"), str)
         ):
-            raise ApiError(
-                "VALIDATION_FAILED", "edited_payload must have title and body strings.", False
-            )
+            raise ApiError("VALIDATION_FAILED", "edited_payload must have title and body strings.", False)
 
         run_id: UUID | None = None
         async with self._repository.transaction(context) as tx:
@@ -148,6 +148,9 @@ class PlanningService:
         if run_id is not None and self._chat is not None:
             content = result.document.body if result.document is not None else None
             await self._chat.complete_run_with_message(context, run_id, content)
+            if result.decision == "confirmed" and result.document is not None:
+                label = _TYPE_LABELS.get(result.document.type, result.document.type)
+                await self._chat.rename_session_for_run(context, run_id, f"{label}·{result.document.title}")
         return result
 
     async def _decide(
@@ -199,9 +202,7 @@ class PlanningService:
             decision="superseded",
         )
 
-    async def _replay_resolved(
-        self, tx: ApprovalTransaction, pending: PendingApproval
-    ) -> ApprovalResult:
+    async def _replay_resolved(self, tx: ApprovalTransaction, pending: PendingApproval) -> ApprovalResult:
         """Rebuild the original result for an idempotent repeated key."""
         original_payload = self._cipher.decrypt_json(pending.approval.payload_ciphertext)
         decision = pending.approval.decision or pending.approval.status

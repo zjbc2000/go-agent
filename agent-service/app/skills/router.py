@@ -51,9 +51,7 @@ async def decide_execution_approval(
     decision = body.get("decision")
     idempotency_key = body.get("idempotency_key")
     if decision not in _VALID_DECISIONS:
-        raise ApiError(
-            "VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False
-        )
+        raise ApiError("VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False)
     if decision != "approve":
         raise ApiError("VALIDATION_FAILED", "Only approve is supported for execution approvals.", False)
     if not isinstance(idempotency_key, str) or not idempotency_key.strip():

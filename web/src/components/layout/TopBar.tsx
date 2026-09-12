@@ -8,6 +8,7 @@ import { useUIStore } from "@/lib/stores/ui-store";
 const PAGE_TITLES: Record<string, string> = {
   "/chat": "对话",
   "/planning": "规划",
+  "/company": "公司",
   "/settings": "设置",
   "/login": "登录",
 };

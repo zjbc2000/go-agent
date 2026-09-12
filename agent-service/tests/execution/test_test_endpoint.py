@@ -23,6 +23,7 @@ from app.main import create_app
 from fastapi import Header
 from fastapi.testclient import TestClient
 from sqlalchemy import text
+from tests.execution.conftest import DATABASE_URL
 
 TEST_INTERNAL_TOKEN = "test-internal-token"
 
@@ -48,6 +49,7 @@ def _make_app(test_mode: bool) -> TestClient:
             internal_token=TEST_INTERNAL_TOKEN,
             outbox_poller_enabled=False,
             test_mode=test_mode,
+            database_url=DATABASE_URL,
         )
     )
 
@@ -81,9 +83,7 @@ def _headers(user_id: uuid.UUID) -> dict[str, str]:
     }
 
 
-async def test_expire_endpoint_requires_test_mode(
-    non_test_mode_client, service, user_context, active_skill
-):
+async def test_expire_endpoint_requires_test_mode(non_test_mode_client, service, user_context, active_skill):
     """The endpoint is inert without AGENT_TEST_MODE=true (403, never 200)."""
     await service.request_execution(user_context, active_skill, {"title": "x"}, "req-gate")
     resp = non_test_mode_client.post(EXPIRE_PATH, headers=_headers(user_context.user_id))
@@ -126,15 +126,11 @@ async def test_expire_endpoint_no_pending_returns_404(test_mode_client, user_con
     assert resp.json()["error"]["code"] == "NOT_FOUND"
 
 
-async def test_expire_endpoint_cross_user_returns_404(
-    test_mode_client, service, repository, user_a, user_b
-):
+async def test_expire_endpoint_cross_user_returns_404(test_mode_client, service, repository, user_a, user_b):
     """User B can never expire User A's approval: RLS hides it entirely."""
     manifest = {
         "schema_version": 1,
-        "steps": [
-            {"id": "s1", "tool": "document.create", "input": {"type": "task", "title": "x", "body": "b"}}
-        ],
+        "steps": [{"id": "s1", "tool": "document.create", "input": {"type": "task", "title": "x", "body": "b"}}],
     }
     skill = await repository.create_active(user_a, type="skill", title="a-skill", body=json.dumps(manifest))
     await service.request_execution(user_a, skill.id, {"title": "x"}, "req-cross")
@@ -144,7 +140,5 @@ async def test_expire_endpoint_cross_user_returns_404(
 
 
 async def test_expire_endpoint_requires_internal_token(test_mode_client, user_context):
-    resp = test_mode_client.post(
-        EXPIRE_PATH, headers={"Authorization": f"Bearer {user_context.user_id}"}
-    )
+    resp = test_mode_client.post(EXPIRE_PATH, headers={"Authorization": f"Bearer {user_context.user_id}"})
     assert resp.status_code == 401

@@ -92,9 +92,7 @@ class ToolBroker:
         self._mcp_executor = mcp_executor
         self._mcp_validator = mcp_validator
 
-    async def invoke(
-        self, grant_token: str, step_id: str, tool_id: str, input: dict[str, Any]
-    ) -> ToolResult:
+    async def invoke(self, grant_token: str, step_id: str, tool_id: str, input: dict[str, Any]) -> ToolResult:
         """Authenticate the grant, validate bounds, execute the tool, record audit.
 
         The grant is the ONLY authentication. The caller-supplied ``tool_id``
@@ -125,7 +123,8 @@ class ToolBroker:
             await self._verify_approval(run)
         elif self._mcp_registry is not None:
             if await self._mcp_registry.is_tool_mutable(
-                uuid.UUID(grant.user_id), step_tool,
+                uuid.UUID(grant.user_id),
+                step_tool,
             ):
                 await self._verify_approval(run)
 
@@ -146,7 +145,8 @@ class ToolBroker:
             result = await self._execute_tool(context, step_tool, step_input)
         except Exception:
             result = ToolResult(
-                success=False, error_code="SANDBOX_ERROR",
+                success=False,
+                error_code="SANDBOX_ERROR",
                 error_message="Tool execution raised an unexpected error.",
             )
             raise
@@ -165,54 +165,50 @@ class ToolBroker:
         except ValueError:
             return None
         async with service_session(self._session_factory) as session:
-            row = await session.scalar(
-                select(SandboxRunRecord).where(SandboxRunRecord.id == rid)
-            )
+            row = await session.scalar(select(SandboxRunRecord).where(SandboxRunRecord.id == rid))
             if row is None or str(row.user_id) != user_id:
                 return None
             return {
-                "id": str(row.id), "status": row.status, "user_id": str(row.user_id),
-                "document_id": str(row.document_id), "version_id": str(row.version_id),
-                "plan_hash": row.plan_hash, "inputs_ciphertext": row.inputs_ciphertext,
+                "id": str(row.id),
+                "status": row.status,
+                "user_id": str(row.user_id),
+                "document_id": str(row.document_id),
+                "version_id": str(row.version_id),
+                "plan_hash": row.plan_hash,
+                "inputs_ciphertext": row.inputs_ciphertext,
                 "approval_id": str(row.approval_id) if row.approval_id else None,
             }
 
     async def _verify_approval(self, run: dict[str, Any]) -> None:
         approval_id = run.get("approval_id")
         if not approval_id:
-            raise ApiError("SANDBOX_GRANT_INVALID",
-                           "Write step requires an execution approval.", False)
+            raise ApiError("SANDBOX_GRANT_INVALID", "Write step requires an execution approval.", False)
         try:
             aid = uuid.UUID(approval_id)
         except ValueError:
             raise ApiError("SANDBOX_GRANT_INVALID", "Invalid approval reference.", False)
         async with service_session(self._session_factory) as session:
-            approval = await session.scalar(
-                select(ExecutionApprovalRecord).where(ExecutionApprovalRecord.id == aid))
+            approval = await session.scalar(select(ExecutionApprovalRecord).where(ExecutionApprovalRecord.id == aid))
         if approval is None:
             raise ApiError("SANDBOX_GRANT_INVALID", "Execution approval not found.", False)
         if approval.status != "confirmed":
-            raise ApiError("SANDBOX_GRANT_INVALID",
-                           "Execution approval was not confirmed.", False)
+            raise ApiError("SANDBOX_GRANT_INVALID", "Execution approval was not confirmed.", False)
         if approval.expires_at is not None and approval.expires_at <= _utcnow():
-            raise ApiError("SANDBOX_GRANT_INVALID",
-                           "Execution approval has expired.", False)
+            raise ApiError("SANDBOX_GRANT_INVALID", "Execution approval has expired.", False)
 
-    async def _recompile_and_verify(
-        self, run: dict[str, Any], grant_plan_hash: str
-    ) -> ExecutionPlan:
+    async def _recompile_and_verify(self, run: dict[str, Any], grant_plan_hash: str) -> ExecutionPlan:
         try:
             vid = uuid.UUID(run["version_id"])
             did = uuid.UUID(run["document_id"])
         except (ValueError, KeyError):
-            raise ApiError("SANDBOX_GRANT_INVALID",
-                           "Run references invalid document version.", False)
+            raise ApiError("SANDBOX_GRANT_INVALID", "Run references invalid document version.", False)
         async with service_session(self._session_factory) as session:
             body_ct = await session.scalar(
                 select(DocumentVersionRecord.body_ciphertext).where(
                     DocumentVersionRecord.id == vid,
                     DocumentVersionRecord.document_id == did,
-                ))
+                )
+            )
         if body_ct is None:
             raise ApiError("SANDBOX_GRANT_INVALID", "Document version not found.", False)
         manifest = json.loads(self._cipher.decrypt(body_ct))
@@ -220,16 +216,12 @@ class ToolBroker:
         inputs = inputs_payload.get("inputs", {}) if isinstance(inputs_payload, dict) else {}
         plan = compile_skill(manifest, inputs, version_id=vid)
         if plan.hash != run["plan_hash"]:
-            raise ApiError("SANDBOX_GRANT_INVALID",
-                           "Plan hash mismatch: recompiled != stored run hash.", False)
+            raise ApiError("SANDBOX_GRANT_INVALID", "Plan hash mismatch: recompiled != stored run hash.", False)
         if plan.hash != grant_plan_hash:
-            raise ApiError("SANDBOX_GRANT_INVALID",
-                           "Plan hash mismatch: grant != recompiled plan.", False)
+            raise ApiError("SANDBOX_GRANT_INVALID", "Plan hash mismatch: grant != recompiled plan.", False)
         return plan
 
-    def _resolve_step(
-        self, plan: ExecutionPlan, step_id: str, caller_tool_id: str
-    ) -> tuple[str, dict[str, Any]]:
+    def _resolve_step(self, plan: ExecutionPlan, step_id: str, caller_tool_id: str) -> tuple[str, dict[str, Any]]:
         """Find the plan step by id; return (declared_tool, compiled_input).
 
         The caller-supplied tool_id must match the declared tool (I2).
@@ -246,14 +238,11 @@ class ToolBroker:
                         False,
                     )
                 return step.tool, step.input
-        raise ApiError("SANDBOX_GRANT_INVALID",
-                       f"Step {step_id!r} not found in the plan.", False)
+        raise ApiError("SANDBOX_GRANT_INVALID", f"Step {step_id!r} not found in the plan.", False)
 
     # ---- Reservation / idempotent replay --------------------------------
 
-    async def _reserve_tool_call(
-        self, run_id: str, user_id_str: str, step_id: str, tool_id: str
-    ) -> bool:
+    async def _reserve_tool_call(self, run_id: str, user_id_str: str, step_id: str, tool_id: str) -> bool:
         """Reserve the (run_id, step_id) row BEFORE executing.
 
         The insert carries the grant user's id — RLS + migration 009 ensure
@@ -267,15 +256,13 @@ class ToolBroker:
         async with service_session(self._session_factory) as session:
             row = await session.execute(
                 insert(SandboxToolCallRecord)
-                .values(run_id=rid, user_id=uid, step_id=step_id,
-                        tool_id=tool_id, result_status="reserved")
+                .values(run_id=rid, user_id=uid, step_id=step_id, tool_id=tool_id, result_status="reserved")
                 .on_conflict_do_nothing(index_elements=["run_id", "step_id"])
-                .returning(SandboxToolCallRecord.id))
+                .returning(SandboxToolCallRecord.id)
+            )
             return row.first() is not None
 
-    async def _handle_loser(
-        self, run_id: str, step_id: str, grant_user_id: str
-    ) -> ToolResult:
+    async def _handle_loser(self, run_id: str, step_id: str, grant_user_id: str) -> ToolResult:
         """The row already exists — distinguish reserved vs finalized (NEW #3).
 
         Filters by ``grant_user_id`` to prevent cross-user poison (NEW #2).
@@ -285,7 +272,8 @@ class ToolBroker:
             return ToolResult(success=True, data={"replayed": True})
         if row["result_status"] == "reserved":
             return ToolResult(
-                success=False, error_code="SANDBOX_STEP_IN_PROGRESS",
+                success=False,
+                error_code="SANDBOX_STEP_IN_PROGRESS",
                 error_message="This step is currently executing; retry.",
             )
         if row["result_ciphertext"] is not None:
@@ -295,12 +283,9 @@ class ToolBroker:
                 success=(row["result_status"] == "succeeded"),
                 data=row["result_ciphertext"],
             )
-        return ToolResult(success=row["result_status"] == "succeeded",
-                          data={"replayed": True})
+        return ToolResult(success=row["result_status"] == "succeeded", data={"replayed": True})
 
-    async def _load_tool_call_row(
-        self, run_id: str, step_id: str, grant_user_id: str
-    ) -> dict[str, Any] | None:
+    async def _load_tool_call_row(self, run_id: str, step_id: str, grant_user_id: str) -> dict[str, Any] | None:
         """Load the tool-call row, filtered by the grant's user_id (NEW #2)."""
         try:
             rid = uuid.UUID(run_id)
@@ -313,20 +298,18 @@ class ToolBroker:
                     SandboxToolCallRecord.run_id == rid,
                     SandboxToolCallRecord.step_id == step_id,
                     SandboxToolCallRecord.user_id == uid,
-                ))
+                )
+            )
             if row is None:
                 return None
             return {
                 "result_status": row.result_status,
                 "result_ciphertext": (
-                    json.loads(self._cipher.decrypt(row.result_ciphertext))
-                    if row.result_ciphertext else None
+                    json.loads(self._cipher.decrypt(row.result_ciphertext)) if row.result_ciphertext else None
                 ),
             }
 
-    async def _store_tool_call_result(
-        self, run_id: str, step_id: str, result: ToolResult
-    ) -> None:
+    async def _store_tool_call_result(self, run_id: str, step_id: str, result: ToolResult) -> None:
         """Update the reserved row with a finalized result (NEW #3).
 
         ALWAYS stores a non-NULL ciphertext — for successes with data AND for
@@ -338,23 +321,25 @@ class ToolBroker:
         except ValueError:
             return
         result_status = "succeeded" if result.success else "failed"
-        payload = result.data if result.data is not None else {
-            "error_code": result.error_code, "error_message": result.error_message,
-        }
-        result_ct = self._cipher.encrypt(
-            json.dumps(payload, separators=(",", ":")))
+        payload = (
+            result.data
+            if result.data is not None
+            else {
+                "error_code": result.error_code,
+                "error_message": result.error_message,
+            }
+        )
+        result_ct = self._cipher.encrypt(json.dumps(payload, separators=(",", ":")))
         async with service_session(self._session_factory) as session:
             await session.execute(
                 update(SandboxToolCallRecord)
-                .where(SandboxToolCallRecord.run_id == rid,
-                       SandboxToolCallRecord.step_id == step_id)
-                .values(result_status=result_status, result_ciphertext=result_ct))
+                .where(SandboxToolCallRecord.run_id == rid, SandboxToolCallRecord.step_id == step_id)
+                .values(result_status=result_status, result_ciphertext=result_ct)
+            )
 
     # ---- Tool dispatch ------------------------------------------------
 
-    async def _execute_tool(
-        self, context: RequestContext, tool_id: str, input: dict[str, Any]
-    ) -> ToolResult:
+    async def _execute_tool(self, context: RequestContext, tool_id: str, input: dict[str, Any]) -> ToolResult:
         if tool_id == "document.read":
             return await self._tool_document_read(context, input)
         elif tool_id == "document.create":
@@ -367,13 +352,15 @@ class ToolBroker:
         elif self._mcp_registry is not None and self._mcp_executor is not None:
             return await self._execute_mcp_tool(context, tool_id, input)
         else:
-            return ToolResult(success=False, error_code="SANDBOX_DENIED",
-                              error_message=f"Unknown tool: {tool_id!r}")
+            return ToolResult(success=False, error_code="SANDBOX_DENIED", error_message=f"Unknown tool: {tool_id!r}")
 
     # ---- MCP tool dispatch (Task 4) ------------------------------------
 
     async def _execute_mcp_tool(
-        self, context: RequestContext, tool_id: str, input: dict[str, Any],
+        self,
+        context: RequestContext,
+        tool_id: str,
+        input: dict[str, Any],
     ) -> ToolResult:
         """Dispatch an MCP tool invocation: validate server/tool enabled,
         execute via the injectable executor, validate output schema.
@@ -383,13 +370,14 @@ class ToolBroker:
         """
         # 1. Verify server + tool are enabled.
         registration = await self._mcp_registry.get_tool_registration(  # type: ignore[union-attr]
-            context.user_id, tool_id,
+            context.user_id,
+            tool_id,
         )
         if registration is None:
             return ToolResult(
-                success=False, error_code="MCP_TOOL_DISABLED",
-                error_message=f"MCP tool {tool_id!r} is not registered, "
-                "enabled, or the server is disabled.",
+                success=False,
+                error_code="MCP_TOOL_DISABLED",
+                error_message=f"MCP tool {tool_id!r} is not registered, enabled, or the server is disabled.",
             )
 
         # 2. Execute via the injectable MCP executor (real or fake).
@@ -417,58 +405,55 @@ class ToolBroker:
             error_message=result.error_message,
         )
 
-    async def _tool_document_read(self, context: RequestContext,
-                                   input: dict[str, Any]) -> ToolResult:
+    async def _tool_document_read(self, context: RequestContext, input: dict[str, Any]) -> ToolResult:
         document_id = _require_uuid(input, "document_id")
         doc = await self._documents.get(context, document_id)
         if doc is None:
-            return ToolResult(success=False, error_code="NOT_FOUND",
-                              error_message="Document not found.")
-        return ToolResult(success=True, data={
-            "id": str(doc.id), "type": doc.type, "title": doc.title,
-            "body": doc.body, "version": doc.version, "status": doc.status,
-        })
+            return ToolResult(success=False, error_code="NOT_FOUND", error_message="Document not found.")
+        return ToolResult(
+            success=True,
+            data={
+                "id": str(doc.id),
+                "type": doc.type,
+                "title": doc.title,
+                "body": doc.body,
+                "version": doc.version,
+                "status": doc.status,
+            },
+        )
 
-    async def _tool_document_create(self, context: RequestContext,
-                                     input: dict[str, Any]) -> ToolResult:
+    async def _tool_document_create(self, context: RequestContext, input: dict[str, Any]) -> ToolResult:
         doc_type = input.get("type")
-        if not isinstance(doc_type, str) or doc_type not in (
-            "memory", "interest", "task", "skill"):
-            return ToolResult(success=False, error_code="VALIDATION_FAILED",
-                              error_message="Invalid document type.")
+        if not isinstance(doc_type, str) or doc_type not in ("memory", "interest", "task", "skill"):
+            return ToolResult(success=False, error_code="VALIDATION_FAILED", error_message="Invalid document type.")
         title = input.get("title", "")
         body = input.get("body", "")
         if not isinstance(title, str) or not isinstance(body, str):
-            return ToolResult(success=False, error_code="VALIDATION_FAILED",
-                              error_message="title and body must be strings.")
-        doc = await self._documents.create_active(
-            context, type=cast(DocumentType, doc_type), title=title, body=body)
-        return ToolResult(success=True, data={
-            "id": str(doc.id), "title": doc.title, "version": doc.version})
+            return ToolResult(
+                success=False, error_code="VALIDATION_FAILED", error_message="title and body must be strings."
+            )
+        doc = await self._documents.create_active(context, type=cast(DocumentType, doc_type), title=title, body=body)
+        return ToolResult(success=True, data={"id": str(doc.id), "title": doc.title, "version": doc.version})
 
-    async def _tool_document_update(self, context: RequestContext,
-                                     input: dict[str, Any]) -> ToolResult:
+    async def _tool_document_update(self, context: RequestContext, input: dict[str, Any]) -> ToolResult:
         document_id = _require_uuid(input, "document_id")
         existing = await self._documents.get(context, document_id)
         if existing is None:
-            return ToolResult(success=False, error_code="NOT_FOUND",
-                              error_message="Document not found.")
+            return ToolResult(success=False, error_code="NOT_FOUND", error_message="Document not found.")
         title = input.get("title", existing.title)
         body = input.get("body", existing.body)
         if not isinstance(title, str) or not isinstance(body, str):
-            return ToolResult(success=False, error_code="VALIDATION_FAILED",
-                              error_message="title and body must be strings.")
-        doc = await self._documents.update_active(context, document_id,
-                                                   title=title, body=body)
+            return ToolResult(
+                success=False, error_code="VALIDATION_FAILED", error_message="title and body must be strings."
+            )
+        doc = await self._documents.update_active(context, document_id, title=title, body=body)
         return ToolResult(success=True, data={"id": str(doc.id), "version": doc.version})
 
-    async def _tool_document_delete(self, context: RequestContext,
-                                     input: dict[str, Any]) -> ToolResult:
+    async def _tool_document_delete(self, context: RequestContext, input: dict[str, Any]) -> ToolResult:
         document_id = _require_uuid(input, "document_id")
         deleted = await self._documents.delete(context, document_id)
         if not deleted:
-            return ToolResult(success=False, error_code="NOT_FOUND",
-                              error_message="Document not found.")
+            return ToolResult(success=False, error_code="NOT_FOUND", error_message="Document not found.")
         return ToolResult(success=True, data={"deleted": True})
 
 

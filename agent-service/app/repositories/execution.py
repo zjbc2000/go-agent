@@ -103,9 +103,7 @@ class ExecutionRepository:
             await session.flush()
             return self._to_approval(row)
 
-    async def expire_latest_pending_approval(
-        self, context: RequestContext
-    ) -> ExecutionApproval | None:
+    async def expire_latest_pending_approval(self, context: RequestContext) -> ExecutionApproval | None:
         """Backdate the caller's newest pending execution approval (test mode only).
 
         User-scoped (RLS): only the caller's own approvals are visible, so a caller
@@ -193,9 +191,7 @@ class ExecutionRepository:
         """
         async with user_scoped_session(self._session_factory, context) as session:
             approval = await session.scalar(
-                select(ExecutionApprovalRecord)
-                .where(ExecutionApprovalRecord.id == approval_id)
-                .with_for_update()
+                select(ExecutionApprovalRecord).where(ExecutionApprovalRecord.id == approval_id).with_for_update()
             )
             if approval is None:
                 raise ApiError("NOT_FOUND", "Execution approval not found.", False)
@@ -224,14 +220,10 @@ class ExecutionRepository:
                 self._add_sandbox_outbox_event(session, context.user_id, run.id, created_at=created_at)
                 await session.flush()
                 return self._to_run(run)
-            resolved = await session.scalar(
-                select(SandboxRunRecord).where(SandboxRunRecord.approval_id == approval_id)
-            )
+            resolved = await session.scalar(select(SandboxRunRecord).where(SandboxRunRecord.approval_id == approval_id))
             if resolved is not None and resolved.idempotency_key == idempotency_key:
                 return self._to_run(resolved)
-            raise ApiError(
-                "APPROVAL_CONFLICT", "Execution approval was already resolved.", False
-            )
+            raise ApiError("APPROVAL_CONFLICT", "Execution approval was already resolved.", False)
 
     def _add_sandbox_outbox_event(
         self,

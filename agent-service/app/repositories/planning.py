@@ -104,9 +104,7 @@ class DocumentRepository:
             updated_at=document.updated_at,
         )
 
-    async def _current_version_row(
-        self, session: AsyncSession, document: DocumentRecord
-    ) -> DocumentVersionRecord:
+    async def _current_version_row(self, session: AsyncSession, document: DocumentRecord) -> DocumentVersionRecord:
         """The version row backing a document's ``current_version`` (RLS-scoped)."""
         row = await session.scalar(
             select(DocumentVersionRecord).where(
@@ -118,9 +116,7 @@ class DocumentRepository:
             raise ApiError("INTERNAL_ERROR", "Document has no current version row.", False)
         return row
 
-    async def create_active(
-        self, context: RequestContext, type: DocumentType, title: str, body: str
-    ) -> Document:
+    async def create_active(self, context: RequestContext, type: DocumentType, title: str, body: str) -> Document:
         """Create an active document as version 1. Title/body are ciphertext-only."""
         async with self._transaction(context) as session:
             title_ct = self._cipher.encrypt(title)
@@ -149,14 +145,10 @@ class DocumentRepository:
             await session.flush()
             return self._to_document(document, version_id)
 
-    async def update_active(
-        self, context: RequestContext, document_id: uuid.UUID, title: str, body: str
-    ) -> Document:
+    async def update_active(self, context: RequestContext, document_id: uuid.UUID, title: str, body: str) -> Document:
         """Append a new current version with the new title/body (never mutates a version)."""
         async with self._transaction(context) as session:
-            document = await session.scalar(
-                select(DocumentRecord).where(DocumentRecord.id == document_id)
-            )
+            document = await session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
             if document is None:
                 raise ApiError("NOT_FOUND", "Document not found.", False)
             title_ct = self._cipher.encrypt(title)
@@ -180,9 +172,7 @@ class DocumentRepository:
             await session.flush()
             return self._to_document(document, version_id)
 
-    async def list_active(
-        self, context: RequestContext, filter: DocumentType | None = None
-    ) -> list[Document]:
+    async def list_active(self, context: RequestContext, filter: DocumentType | None = None) -> list[Document]:
         """List the caller's active documents, optionally narrowed to one category."""
         async with self._transaction(context) as session:
             query = select(DocumentRecord).where(DocumentRecord.status == "active")
@@ -198,26 +188,20 @@ class DocumentRepository:
     async def get(self, context: RequestContext, document_id: uuid.UUID) -> Document | None:
         """Return the caller's document, or None if the caller does not own it (RLS)."""
         async with self._transaction(context) as session:
-            document = await session.scalar(
-                select(DocumentRecord).where(DocumentRecord.id == document_id)
-            )
+            document = await session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
             if document is None:
                 return None
             current = await self._current_version_row(session, document)
             return self._to_document(document, current.id)
 
-    async def list_versions(
-        self, context: RequestContext, document_id: uuid.UUID
-    ) -> list[DocumentVersionInfo]:
+    async def list_versions(self, context: RequestContext, document_id: uuid.UUID) -> list[DocumentVersionInfo]:
         """List the caller's version rows for a document, oldest first (RLS).
 
         The document lookup is user-scoped, so a document the caller does not own is
         never visible and surfaces as NOT_FOUND.
         """
         async with self._transaction(context) as session:
-            document = await session.scalar(
-                select(DocumentRecord).where(DocumentRecord.id == document_id)
-            )
+            document = await session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
             if document is None:
                 raise ApiError("NOT_FOUND", "Document not found.", False)
             rows = (
@@ -243,30 +227,38 @@ class DocumentRepository:
         """Hard-delete the caller's document (RLS-gated to the owner).
 
         Returns True if a row was deleted, False if the document was not found
-        or not owned by the caller.
+        or not owned by the caller. Writes an audit row (document.deleted) BEFORE
+        the delete so the trail survives the document row's removal.
         """
         async with self._transaction(context) as session:
-            document = await session.scalar(
-                select(DocumentRecord).where(DocumentRecord.id == document_id)
-            )
+            document = await session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
             if document is None:
                 return False
+            detail_ct = self._cipher.encrypt(
+                json.dumps({"type": document.type, "title": self._cipher.decrypt(document.title_ciphertext)})
+            )
+            session.add(
+                AuditLogRecord(
+                    id=uuid.uuid4(),
+                    user_id=context.user_id,
+                    document_id=document_id,
+                    action="document.deleted",
+                    detail_ciphertext=detail_ct,
+                )
+            )
             await session.delete(document)
             await session.flush()
             return True
 
-    async def restore_version(
-        self, context: RequestContext, document_id: uuid.UUID, version_id: uuid.UUID
-    ) -> Document:
-        """Restore a prior version's ciphertext as a NEW current version.
+    async def restore_version(self, context: RequestContext, document_id: uuid.UUID, version_id: uuid.UUID) -> Document:
+        """Switch the document's current version to the target version row.
 
-        The restored row copies the target version's ciphertext verbatim; no
-        plaintext ever round-trips through the service during a restore.
+        The document's ``current_version`` pointer is set to the target version; no
+        new version row is created. The previously-current version becomes non-current
+        (and becomes deletable). No plaintext round-trips during a switch.
         """
         async with self._transaction(context) as session:
-            document = await session.scalar(
-                select(DocumentRecord).where(DocumentRecord.id == document_id)
-            )
+            document = await session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
             if document is None:
                 raise ApiError("NOT_FOUND", "Document not found.", False)
             target = await session.scalar(
@@ -277,29 +269,57 @@ class DocumentRepository:
             )
             if target is None:
                 raise ApiError("NOT_FOUND", "Version not found.", False)
-            next_version = document.current_version + 1
-            new_version_id = uuid.uuid4()
-            session.add(
-                DocumentVersionRecord(
-                    id=new_version_id,
-                    user_id=document.user_id,
-                    document_id=document.id,
-                    version=next_version,
-                    title_ciphertext=target.title_ciphertext,
-                    body_ciphertext=target.body_ciphertext,
-                )
-            )
-            document.current_version = next_version
+            document.current_version = target.version
             document.title_ciphertext = target.title_ciphertext
             document.body_ciphertext = target.body_ciphertext
             document.updated_at = _utcnow()
             await session.flush()
-            return self._to_document(document, new_version_id)
+            return self._to_document(document, target.id)
 
+    async def delete_version(self, context: RequestContext, document_id: uuid.UUID, version_id: uuid.UUID) -> bool:
+        """Delete a NON-current version row of the caller's document (RLS-scoped).
 
-    async def get_pending_draft_for_run(
-        self, context: RequestContext, run_id: uuid.UUID
-    ) -> DraftApproval | None:
+        The current version cannot be deleted: the ``documents`` row points at it via
+        ``current_version``, and every read resolves it through ``_current_version_row``
+        (deleting it would break the document). Returns True on success, False if the
+        document or version is not owned/found.
+        """
+        async with self._transaction(context) as session:
+            document = await session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
+            if document is None:
+                return False
+            target = await session.scalar(
+                select(DocumentVersionRecord).where(
+                    DocumentVersionRecord.id == version_id,
+                    DocumentVersionRecord.document_id == document_id,
+                )
+            )
+            if target is None:
+                return False
+            if target.version == document.current_version:
+                return False
+            detail_ct = self._cipher.encrypt(
+                json.dumps(
+                    {
+                        "version": target.version,
+                        "title": self._cipher.decrypt(target.title_ciphertext),
+                    }
+                )
+            )
+            session.add(
+                AuditLogRecord(
+                    id=uuid.uuid4(),
+                    user_id=context.user_id,
+                    document_id=document_id,
+                    action="document.version.deleted",
+                    detail_ciphertext=detail_ct,
+                )
+            )
+            await session.delete(target)
+            await session.flush()
+            return True
+
+    async def get_pending_draft_for_run(self, context: RequestContext, run_id: uuid.UUID) -> DraftApproval | None:
         """Return the caller's pending draft linked to ``run_id``, or None (RLS-scoped).
 
         Used by ``PlanningService.create_document_draft`` as an idempotency guard so a
@@ -309,15 +329,11 @@ class DocumentRepository:
 
         async with self._transaction(context) as session:
             approval = await session.scalar(
-                select(ApprovalRecord).where(
-                    ApprovalRecord.run_id == run_id, ApprovalRecord.status == "pending"
-                )
+                select(ApprovalRecord).where(ApprovalRecord.run_id == run_id, ApprovalRecord.status == "pending")
             )
             if approval is None:
                 return None
-            draft = await session.scalar(
-                select(DocumentDraftRecord).where(DocumentDraftRecord.id == approval.draft_id)
-            )
+            draft = await session.scalar(select(DocumentDraftRecord).where(DocumentDraftRecord.id == approval.draft_id))
             if draft is None:
                 return None
             payload = self._cipher.decrypt_json(approval.payload_ciphertext)
@@ -406,9 +422,7 @@ class ApprovalTransaction:
         """Insert a pending proposal draft + its approval in one transaction."""
         based_on_version = 0
         if document_id is not None:
-            document = await self._session.scalar(
-                select(DocumentRecord).where(DocumentRecord.id == document_id)
-            )
+            document = await self._session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
             if document is None:
                 raise ApiError("NOT_FOUND", "Document not found.", False)
             based_on_version = document.current_version
@@ -519,9 +533,7 @@ class ApprovalTransaction:
 
     async def supersede_draft(self, draft_id: uuid.UUID) -> None:
         """Mark a draft superseded so it can never be confirmed."""
-        draft = await self._session.scalar(
-            select(DocumentDraftRecord).where(DocumentDraftRecord.id == draft_id)
-        )
+        draft = await self._session.scalar(select(DocumentDraftRecord).where(DocumentDraftRecord.id == draft_id))
         if draft is None:
             raise ApiError("INTERNAL_ERROR", "Draft not found.", False)
         draft.status = "superseded"
@@ -551,9 +563,7 @@ class ApprovalTransaction:
 
     async def load_document(self, document_id: uuid.UUID) -> Document | None:
         """Return the caller's document DTO, or None if not visible (RLS)."""
-        row = await self._session.scalar(
-            select(DocumentRecord).where(DocumentRecord.id == document_id)
-        )
+        row = await self._session.scalar(select(DocumentRecord).where(DocumentRecord.id == document_id))
         if row is None:
             return None
         current = await self._repo._current_version_row(self._session, row)

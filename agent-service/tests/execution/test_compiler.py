@@ -101,7 +101,5 @@ def test_compiler_hash_is_deterministic_over_canonical_json():
     other = compile_skill(manifest, {"document_id": "00000000-0000-0000-0000-000000000011"}, version_id=VERSION_ID)
     assert first.hash != other.hash
     # A different version binding also changes the hash.
-    rebound = compile_skill(
-        manifest, inputs, version_id=uuid.UUID("00000000-0000-0000-0000-000000000002")
-    )
+    rebound = compile_skill(manifest, inputs, version_id=uuid.UUID("00000000-0000-0000-0000-000000000002"))
     assert first.hash != rebound.hash

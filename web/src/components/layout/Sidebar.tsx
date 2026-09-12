@@ -3,7 +3,15 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { Plus, MessageSquare, Compass, Settings, PanelLeftClose, PanelLeft } from "lucide-react";
+import {
+  Plus,
+  MessageSquare,
+  Compass,
+  Building2,
+  Settings,
+  PanelLeftClose,
+  PanelLeft,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
@@ -17,6 +25,7 @@ import { useRepositories } from "@/lib/providers/repository-context";
 const NAV_ITEMS = [
   { href: "/chat", label: "对话", icon: MessageSquare },
   { href: "/planning", label: "规划", icon: Compass },
+  { href: "/company", label: "公司", icon: Building2 },
   { href: "/settings", label: "设置", icon: Settings },
 ];
 

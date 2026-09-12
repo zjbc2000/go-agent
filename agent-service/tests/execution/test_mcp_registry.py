@@ -51,46 +51,46 @@ class McpRegistryTester:
 
     async def register(self, manifest: dict):
         from app.core.context import RequestContext, new_request_id
+
         return await self.registry.register_mcp(
-            RequestContext(user_id=self.user_id, role="user",
-                          request_id=new_request_id()),
+            RequestContext(user_id=self.user_id, role="user", request_id=new_request_id()),
             manifest,
         )
 
     async def discover(self, server_id: uuid.UUID):
         from app.core.context import RequestContext, new_request_id
+
         return await self.registry.discover_tools(
-            RequestContext(user_id=self.user_id, role="user",
-                          request_id=new_request_id()),
+            RequestContext(user_id=self.user_id, role="user", request_id=new_request_id()),
             server_id,
         )
 
     async def is_allowed(self, tool_id: str) -> bool:
         from app.core.context import RequestContext, new_request_id
+
         return await self.registry.is_tool_allowed(
-            RequestContext(user_id=self.user_id, role="user",
-                          request_id=new_request_id()),
+            RequestContext(user_id=self.user_id, role="user", request_id=new_request_id()),
             tool_id,
         )
 
 
 # --- Fixtures ---
 
+
 @pytest.fixture
 def engine() -> AsyncEngine:
     import os
 
     from sqlalchemy.ext.asyncio import create_async_engine
-    url = os.getenv("TEST_DATABASE_URL",
-                    "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres")
+
+    url = os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres")
     return create_async_engine(url, pool_pre_ping=True)
 
 
 @pytest.fixture(autouse=True)
 async def _clean(engine: AsyncEngine):
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
-        await session.execute(
-            text("truncate table public.mcp_tools, public.mcp_servers cascade"))
+        await session.execute(text("truncate table public.mcp_tools, public.mcp_servers cascade"))
         await session.commit()
 
 
@@ -113,6 +113,7 @@ async def tester(registry: McpRegistry, engine: AsyncEngine) -> McpRegistryTeste
 
 # --- Manifest schema tests ---
 
+
 def test_manifest_rejects_mutable_image_tag():
     """Plan's verbatim: registry rejects an unpinned tag image.
 
@@ -120,14 +121,16 @@ def test_manifest_rejects_mutable_image_tag():
     unpinned tag; register_mcp catches that and raises ApiError.
     """
     with pytest.raises(Exception) as exc_info:
-        McpManifest.model_validate({
-            "schema_version": 1,
-            "name": "bad",
-            "image": "registry.example/tool:latest",
-            "provenance": "x",
-            "sbom": "y",
-            "tools": [],
-        })
+        McpManifest.model_validate(
+            {
+                "schema_version": 1,
+                "name": "bad",
+                "image": "registry.example/tool:latest",
+                "provenance": "x",
+                "sbom": "y",
+                "tools": [],
+            }
+        )
     # Pydantic wraps the ValueError inside ValidationError.
     error_str = str(exc_info.value)
     assert "digest" in error_str.lower() or "sha256" in error_str.lower()
@@ -143,22 +146,27 @@ def test_registry_rejects_mutable_image_tag(registry: McpRegistry):
 
     async def _run():
         from app.core.context import RequestContext, new_request_id
+
         uid = uuid.uuid4()
         ctx = RequestContext(user_id=uid, role="user", request_id=new_request_id())
         with pytest.raises(ApiError, match="MCP_DIGEST_REQUIRED"):
-            await registry.register_mcp(ctx, {
-                "schema_version": 1,
-                "name": "bad",
-                "image": "registry.example/tool:latest",
-                "provenance": "x",
-                "sbom": "y",
-                "tools": [],
-            })
+            await registry.register_mcp(
+                ctx,
+                {
+                    "schema_version": 1,
+                    "name": "bad",
+                    "image": "registry.example/tool:latest",
+                    "provenance": "x",
+                    "sbom": "y",
+                    "tools": [],
+                },
+            )
 
     asyncio.get_event_loop().run_until_complete(_run())
 
 
 # --- Registry integration tests ---
+
 
 @pytest.mark.asyncio
 async def test_valid_pinned_manifest_registers_server_and_tools(tester: McpRegistryTester):
@@ -192,7 +200,8 @@ async def test_registry_rejects_missing_sbom(tester: McpRegistryTester):
 
 @pytest.mark.asyncio
 async def test_cross_user_discover_returns_empty(
-    registry: McpRegistry, engine: AsyncEngine,
+    registry: McpRegistry,
+    engine: AsyncEngine,
 ):
     """Discover by user B on user A's server returns empty (cross-user isolation)."""
     uid_a = uuid.uuid4()
@@ -235,7 +244,8 @@ async def test_is_tool_allowed_returns_true_for_registered_enabled(tester: McpRe
 
 @pytest.mark.asyncio
 async def test_mutable_flag_is_persisted(
-    registry: McpRegistry, tester: McpRegistryTester,
+    registry: McpRegistry,
+    tester: McpRegistryTester,
 ):
     """The mutable flag from the manifest is persisted and discoverable."""
     await tester.register(_VALID_MANIFEST)
@@ -271,7 +281,8 @@ _VALID_MANIFEST_POWER_TOOL: dict = {
 
 @pytest.mark.asyncio
 async def test_tool_without_explicit_mutable_field_defaults_to_mutable(
-    registry: McpRegistry, engine: AsyncEngine,
+    registry: McpRegistry,
+    engine: AsyncEngine,
 ):
     """IMPORTANT #1: a tool registered WITHOUT an explicit ``mutable`` field
     must be treated as MUTABLE (fail-closed default). It routes to an approval.

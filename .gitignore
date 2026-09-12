@@ -10,7 +10,6 @@ __pycache__/
 # Env / secrets (opt-in .env.example)
 .env
 
-
 # Test artifacts
 coverage/
 htmlcov/

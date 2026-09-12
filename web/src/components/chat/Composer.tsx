@@ -2,15 +2,17 @@
 
 import { useState, useRef, useCallback } from "react";
 import { useRouter } from "next/navigation";
-import { Send, Square } from "lucide-react";
+import { Send, Square, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
+import { Badge } from "@/components/ui/badge";
 import { useChatStore } from "@/lib/stores/chat-store";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useRepositories } from "@/lib/providers/repository-context";
 import { ChatStreamError } from "@/lib/api/real-chat-repository";
 import { generateRequestId } from "@/lib/utils/id";
-import type { ChatEvent, ChatState, RunStream } from "@/lib/domain/types";
+import { PlanningPicker } from "./PlanningPicker";
+import type { ChatEvent, ChatState, PlanningDocument, RunStream } from "@/lib/domain/types";
 
 const MAX_RECONNECT_ATTEMPTS = 5;
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
@@ -18,8 +20,17 @@ const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 export function Composer() {
   const [input, setInput] = useState("");
   const [sending, setSending] = useState(false);
+  const [selectedDocs, setSelectedDocs] = useState<PlanningDocument[]>([]);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const abortRef = useRef<AbortController | null>(null);
+
+  const toggleDoc = useCallback((doc: PlanningDocument) => {
+    setSelectedDocs((prev) =>
+      prev.some((d) => d.id === doc.id)
+        ? prev.filter((d) => d.id !== doc.id)
+        : [...prev, doc],
+    );
+  }, []);
 
   const {
     activeSessionId,
@@ -29,6 +40,7 @@ export function Composer() {
     addUserMessage,
     addSession,
     addDraft,
+    addEmployeeDraft,
     startRun,
     updateRunCursor,
     clearRunState,
@@ -41,7 +53,8 @@ export function Composer() {
 
   const isStreaming =
     chatState === "streaming" || chatState === "connecting" || chatState === "reconnecting";
-  const canSend = input.trim().length > 0 && !sending && !isStreaming;
+  const canSend =
+    (input.trim().length > 0 || selectedDocs.length > 0) && !sending && !isStreaming;
 
   // Transition chat state and keep the connection banner in sync (reconnecting/error).
   const setChatStatus = useCallback(
@@ -118,6 +131,17 @@ export function Composer() {
           }));
           break;
 
+        case "employee-action":
+          addEmployeeDraft(event.approval);
+          // An employee action ends the assistant stream like a draft does.
+          setChatStatus("completed");
+          useChatStore.setState((s) => ({
+            messages: s.messages.map((m) =>
+              m.id === event.approval.messageId ? { ...m, status: "completed" as const } : m,
+            ),
+          }));
+          break;
+
         case "done":
           setChatStatus("completed");
           // Mark assistant message as completed
@@ -143,12 +167,17 @@ export function Composer() {
           break;
       }
     },
-    [activeSessionId, addDraft, setChatStatus],
+    [activeSessionId, addDraft, addEmployeeDraft, setChatStatus],
   );
 
   const handleSend = useCallback(async () => {
-    const content = input.trim();
-    if (!content) return;
+    const text = input.trim();
+    if (!text && selectedDocs.length === 0) return;
+
+    // Compose the outgoing content: user text + each referenced planning doc as
+    // prompt context (the chip shows the title only; the content is appended here).
+    const refs = selectedDocs.map((d) => `【参考规划：${d.title}】\n${d.content}`);
+    const content = [text, ...refs].filter(Boolean).join("\n\n");
 
     let sessionId = activeSessionId;
 
@@ -161,6 +190,7 @@ export function Composer() {
     }
 
     setInput("");
+    setSelectedDocs([]);
     setSending(true);
 
     // Add user message locally
@@ -243,6 +273,7 @@ export function Composer() {
     }
   }, [
     input,
+    selectedDocs,
     activeSessionId,
     chatRepo,
     addUserMessage,
@@ -273,7 +304,27 @@ export function Composer() {
 
   return (
     <div className="border-t border-border bg-background px-4 py-3">
-      <div className="flex items-end gap-2 max-w-3xl mx-auto">
+      {selectedDocs.length > 0 && (
+        <div className="flex flex-wrap gap-2 mb-2 max-w-4xl mx-auto">
+          {selectedDocs.map((doc) => (
+            <Badge key={doc.id} variant="secondary" className="gap-1">
+              <span className="truncate max-w-40">{doc.title}</span>
+              <button
+                type="button"
+                aria-label={`移除 ${doc.title}`}
+                onClick={() =>
+                  setSelectedDocs((prev) => prev.filter((d) => d.id !== doc.id))
+                }
+                className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive"
+              >
+                <X className="h-3 w-3" />
+              </button>
+            </Badge>
+          ))}
+        </div>
+      )}
+      <div className="flex items-end gap-2 max-w-4xl mx-auto">
+        <PlanningPicker selected={selectedDocs} onToggle={toggleDoc} />
         <Textarea
           ref={textareaRef}
           value={input}

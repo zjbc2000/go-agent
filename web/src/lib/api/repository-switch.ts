@@ -5,6 +5,7 @@
 import type { RepositoryBundle } from "@/lib/providers/repository-context";
 import { createMockRepositories } from "@/lib/mock";
 import { createRealChatRepository } from "./real-chat-repository";
+import { createRealCompanyRepository } from "./real-company-repository";
 import { createRealPlanningRepository } from "./real-planning-repository";
 import { createRealAuthRepository } from "./real-auth-repository";
 
@@ -20,6 +21,7 @@ export function createRepositories(): RepositoryBundle {
       auth: createRealAuthRepository(),
       chat: createRealChatRepository(),
       planning: createRealPlanningRepository(),
+      company: createRealCompanyRepository(),
     };
   }
 

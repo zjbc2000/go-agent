@@ -8,6 +8,8 @@ import type {
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { useRepositories } from "@/lib/providers/repository-context";
 import { VersionHistory } from "./VersionHistory";
 import { SkillExecutionCard } from "@/components/approval/SkillExecutionCard";
@@ -39,6 +41,10 @@ function skillStepCount(content: string): number | undefined {
 
 export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentProps) {
   const [showVersions, setShowVersions] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState(doc.title);
+  const [editContent, setEditContent] = useState(doc.content);
+  const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleted, setDeleted] = useState(false);
   const [executing, setExecuting] = useState(false);
@@ -46,6 +52,23 @@ export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentP
   const { planning: planningRepo } = useRepositories();
 
   const isSkill = doc.category === "skill";
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      await planningRepo.updateDocument(doc.id, {
+        title: editTitle.trim() || doc.title,
+        content: editContent.trim() || doc.content,
+      });
+      setEditing(false);
+      toast.success("已保存，生成新版本");
+      onUpdated();
+    } catch {
+      toast.error("保存失败，请重试");
+    } finally {
+      setSaving(false);
+    }
+  };
 
   // "执行 Skill" on a skill-type document (a justified addition beyond the plan's
   // file list): request an execution and show the returned approval/run card.
@@ -109,7 +132,7 @@ export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentP
               size="icon"
               className="h-7 w-7"
               aria-label="编辑"
-              onClick={() => toast("编辑功能开发中")}
+              onClick={() => setEditing(true)}
             >
               <Pencil className="h-3.5 w-3.5" />
             </Button>
@@ -136,13 +159,41 @@ export function PlanningDocument({ document: doc, onUpdated }: PlanningDocumentP
         </div>
       </CardHeader>
       <CardContent className="px-4 pb-4">
-        <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
-          {doc.content}
-        </p>
-        <p className="text-[10px] text-muted-foreground mt-2">
-          版本 {doc.version} · 更新于{" "}
-          {new Date(doc.updatedAt).toLocaleDateString("zh-CN")}
-        </p>
+        {editing ? (
+          <div className="space-y-2">
+            <Input
+              value={editTitle}
+              onChange={(e) => setEditTitle(e.target.value)}
+              aria-label="标题"
+              className="h-8 text-sm"
+            />
+            <Textarea
+              value={editContent}
+              onChange={(e) => setEditContent(e.target.value)}
+              aria-label="内容"
+              rows={4}
+              className="text-sm resize-none"
+            />
+            <div className="flex gap-2 justify-end">
+              <Button variant="ghost" size="sm" onClick={() => setEditing(false)}>
+                取消
+              </Button>
+              <Button variant="default" size="sm" disabled={saving} onClick={handleSave}>
+                {saving ? "保存中..." : "保存"}
+              </Button>
+            </div>
+          </div>
+        ) : (
+          <>
+            <p className="text-xs text-muted-foreground whitespace-pre-wrap leading-relaxed">
+              {doc.content}
+            </p>
+            <p className="text-[10px] text-muted-foreground mt-2">
+              版本 {doc.version} · 更新于{" "}
+              {new Date(doc.updatedAt).toLocaleDateString("zh-CN")}
+            </p>
+          </>
+        )}
 
         {showVersions && (
           <div className="mt-3">

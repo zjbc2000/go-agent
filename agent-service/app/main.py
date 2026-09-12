@@ -19,6 +19,8 @@ from app.core.config import Settings
 from app.core.context import RequestContext
 from app.core.crypto import LocalEnvelopeCipher
 from app.core.errors import ApiError, api_error_handler
+from app.employees.router import router as employees_router
+from app.employees.service import EmployeeService
 from app.execution.grant import GrantVerifier
 from app.execution.publisher import AioPikaRabbitMqClient, OutboxPublisher
 from app.execution.tool_broker import ToolBroker
@@ -28,6 +30,7 @@ from app.mcp.validator import McpValidator
 from app.planning.router import router as planning_router
 from app.planning.service import PlanningService
 from app.repositories.chat import ChatRepository
+from app.repositories.employees import EmployeeRepository
 from app.repositories.execution import ExecutionRepository
 from app.repositories.planning import DocumentRepository
 from app.skills.router import router as skills_router
@@ -45,9 +48,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not settings.outbox_poller_enabled:
             yield
             return
-        poller = asyncio.create_task(
-            _outbox_poll_loop(publisher, settings.outbox_poll_interval_seconds)
-        )
+        poller = asyncio.create_task(_outbox_poll_loop(publisher, settings.outbox_poll_interval_seconds))
         try:
             yield
         finally:
@@ -64,8 +65,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     cipher = LocalEnvelopeCipher.from_base64_key(settings.crypto_key_b64)
     repo = ChatRepository(session_factory=session_factory, cipher=cipher)
     planning_repository = DocumentRepository(session_factory=session_factory, cipher=cipher)
+    employee_repository = EmployeeRepository(session_factory=session_factory, cipher=cipher)
     provider = build_provider(settings)
-    assistant_graph = build_assistant_graph(provider, planning_repository)
+    assistant_graph = build_assistant_graph(provider, planning_repository, employee_repository)
     service = ChatService(
         repo=repo,
         provider=provider,
@@ -78,6 +80,12 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         chat=service,
     )
     service.set_draft_writer(planning_service.create_document_draft)
+    employee_service = EmployeeService(
+        repository=employee_repository,
+        cipher=cipher,
+        chat=service,
+    )
+    service.set_employee_writer(employee_service.create_employee_action_draft)
     execution_repository = ExecutionRepository(session_factory=session_factory, cipher=cipher)
     app.state.execution_repository = execution_repository
     mcp_registry = McpRegistry(session_factory=session_factory)
@@ -101,6 +109,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.chat_service = service
     app.state.planning_service = planning_service
     app.state.planning_repository = planning_repository
+    app.state.employee_service = employee_service
     app.state.skill_service = skill_service
     app.state.outbox_publisher = publisher
     grant_verifier = GrantVerifier(settings.tool_grant_secret)
@@ -117,6 +126,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.mcp_registry = mcp_registry
     app.include_router(chat_router)
     app.include_router(planning_router)
+    app.include_router(employees_router)
     app.include_router(skills_router)
     app.include_router(mcp_router)
 
@@ -148,9 +158,11 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if not isinstance(input_data, dict):
             raise ApiError("VALIDATION_FAILED", "input must be an object.", False)
         result = await tool_broker.invoke(grant_token, step_id, tool_id, input_data)
-        return {"data": result.data} if result.success else {
-            "error": {"code": result.error_code, "message": result.error_message}
-        }
+        return (
+            {"data": result.data}
+            if result.success
+            else {"error": {"code": result.error_code, "message": result.error_message}}
+        )
 
     # --- TEST-ONLY endpoint (Task 5 E2E) ---
     #

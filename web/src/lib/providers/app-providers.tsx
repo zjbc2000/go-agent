@@ -6,7 +6,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { Toaster } from "@/components/ui/sonner";
 import { RepositoryContext } from "./repository-context";
 import { createRepositories } from "@/lib/api/repository-switch";
-import { useState } from "react";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { useEffect, useState } from "react";
 
 function makeQueryClient() {
   return new QueryClient({
@@ -19,6 +20,14 @@ function makeQueryClient() {
 export function AppProviders({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(makeQueryClient);
   const [repos] = useState(createRepositories);
+
+  // Restore the authenticated user on every full page load (Zustand is not
+  // persisted, so without this the auth store is null after a refresh and pages
+  // fall back to placeholder accounts).
+  useEffect(() => {
+    const { auth } = repos;
+    useAuthStore.getState().checkSession(auth).catch(() => {});
+  }, [repos]);
 
   return (
     <ThemeProvider

@@ -55,9 +55,7 @@ async def test_publish_marks_published_only_after_ack(engine, service, user_cont
     assert await outbox.event_status(SANDBOX_EXECUTE_TASK, run.id) == "published"
 
 
-async def test_failed_publish_retries_with_bounded_backoff(
-    engine, db_session, service, user_context, approval, outbox
-):
+async def test_failed_publish_retries_with_bounded_backoff(engine, db_session, service, user_context, approval, outbox):
     run = await service.confirm_execution(user_context, approval.id, "confirm-1")
     client = FakeRabbitMqClient(fail_with=RuntimeError("broker down"))
     publisher = _publisher(engine, client)
@@ -76,9 +74,7 @@ async def test_failed_publish_retries_with_bounded_backoff(
 
 async def test_publish_skips_exhausted_attempts(engine, db_session, service, user_context, approval):
     run = await service.confirm_execution(user_context, approval.id, "confirm-1")
-    await db_session.execute(
-        text("update outbox_events set attempts = 5 where aggregate_id = :rid"), {"rid": run.id}
-    )
+    await db_session.execute(text("update outbox_events set attempts = 5 where aggregate_id = :rid"), {"rid": run.id})
     await db_session.commit()
     client = FakeRabbitMqClient()
     publisher = _publisher(engine, client, max_attempts=5)
@@ -89,10 +85,7 @@ async def test_publish_skips_exhausted_attempts(engine, db_session, service, use
 async def test_publish_skips_event_not_yet_due(engine, db_session, service, user_context, approval):
     run = await service.confirm_execution(user_context, approval.id, "confirm-1")
     await db_session.execute(
-        text(
-            "update outbox_events set next_attempt_at = now() + interval '1 hour' "
-            "where aggregate_id = :rid"
-        ),
+        text("update outbox_events set next_attempt_at = now() + interval '1 hour' where aggregate_id = :rid"),
         {"rid": run.id},
     )
     await db_session.commit()
@@ -102,9 +95,7 @@ async def test_publish_skips_event_not_yet_due(engine, db_session, service, user
     assert client.published == []
 
 
-async def test_real_rabbitmq_publish_lands_in_sandbox_execute_queue(
-    engine, service, user_context, approval
-):
+async def test_real_rabbitmq_publish_lands_in_sandbox_execute_queue(engine, service, user_context, approval):
     """Integration under the Step-4 gate: requires the goudan-rabbitmq broker."""
     import aio_pika
     from app.execution.publisher import AioPikaRabbitMqClient

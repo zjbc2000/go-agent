@@ -6,20 +6,25 @@
 import type {
   ApprovalDecisionInput,
   ApprovalResult,
+  CreateEmployeeInput,
   CreatedRun,
   DocumentVersion,
+  Employee,
+  EmployeeActionApproval,
+  EmployeeActionKind,
+  EmployeeDecisionResult,
   ExecutionApprovalDecision,
   ExecutionDecisionResult,
   Message,
   PlanningDocument,
   PlanningFilter,
-  PlanDraft,
   RunSnapshot,
   RunStream,
   RunStreamOptions,
   Session,
   SkillExecution,
   UpdateDocumentInput,
+  UpdateEmployeeInput,
   User,
 } from "./types";
 
@@ -60,8 +65,10 @@ export interface ChatRepository {
   /** Reconstruct a run's current status and text from its persisted event replay. */
   getRun(runId: string): Promise<RunSnapshot | null>;
 
-  createSession(): Promise<Session>;
+  /** Create a session, optionally named and optionally bound to an employee. */
+  createSession(title?: string, employeeId?: string): Promise<Session>;
   deleteSession(sessionId: string): Promise<void>;
+  renameSession(sessionId: string, title: string): Promise<void>;
 }
 
 // --- Planning ---
@@ -76,6 +83,7 @@ export interface PlanningRepository {
   listVersions(documentId: string): Promise<DocumentVersion[]>;
   restoreVersion(documentId: string, versionId: string): Promise<void>;
   deleteDocument(documentId: string): Promise<void>;
+  deleteVersion(documentId: string, versionId: string): Promise<void>;
 
   /**
    * Request a skill execution. Write/delete skills return a pending execution
@@ -94,4 +102,30 @@ export interface PlanningRepository {
     decision: ExecutionApprovalDecision,
     idempotencyKey: string,
   ): Promise<ExecutionDecisionResult>;
+}
+
+// --- Company / employees ---
+
+export interface CompanyRepository {
+  listEmployees(): Promise<Employee[]>;
+  createEmployee(input: CreateEmployeeInput): Promise<Employee>;
+  updateEmployee(id: string, input: UpdateEmployeeInput): Promise<Employee>;
+
+  /**
+   * Open a HITL approval for a fire/rehire/adjust_position action. The pending
+   * approval is returned; the transition applies only when the owner decides it.
+   */
+  requestEmployeeAction(input: {
+    employeeId: string;
+    action: EmployeeActionKind;
+    position?: string;
+    idempotencyKey: string;
+  }): Promise<EmployeeActionApproval>;
+
+  /** Decide a pending employee action ("approve" applies the transition). */
+  decideEmployeeApproval(
+    approvalId: string,
+    decision: "approve" | "reject",
+    idempotencyKey: string,
+  ): Promise<EmployeeDecisionResult>;
 }

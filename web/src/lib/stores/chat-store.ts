@@ -3,7 +3,7 @@
 // ============================================================
 
 import { create } from "zustand";
-import type { ChatState, Message, PlanDraft, Session } from "@/lib/domain/types";
+import type { ChatState, EmployeeActionApproval, Message, PlanDraft, Session } from "@/lib/domain/types";
 import type { ChatRepository } from "@/lib/domain/repositories";
 import { generateRequestId } from "@/lib/utils/id";
 
@@ -23,6 +23,7 @@ interface ChatStore {
   setActiveSession: (id: string | null) => void;
   addSession: (session: Session) => void;
   removeSession: (sessionId: string) => void;
+  renameSession: (sessionId: string, title: string) => void;
 
   // Messages
   messages: Message[];
@@ -48,6 +49,13 @@ interface ChatStore {
   removeDraft: (id: string) => void;
   getSessionDrafts: (sessionId: string) => PlanDraft[];
 
+  // Employee action approvals (HITL cards in chat)
+  employeeDrafts: EmployeeActionApproval[];
+  addEmployeeDraft: (approval: EmployeeActionApproval) => void;
+  updateEmployeeDraft: (id: string, updates: Partial<EmployeeActionApproval>) => void;
+  removeEmployeeDraft: (id: string) => void;
+  getSessionEmployeeDrafts: (sessionId: string) => EmployeeActionApproval[];
+
   // Scroll
   userScrolledUp: boolean;
   setUserScrolledUp: (v: boolean) => void;
@@ -67,7 +75,13 @@ export const useChatStore = create<ChatStore>((set, get) => ({
   },
 
   setActiveSession(id: string | null) {
-    set({ activeSessionId: id, messages: [], drafts: [], chatState: "idle" });
+    set({
+      activeSessionId: id,
+      messages: [],
+      drafts: [],
+      employeeDrafts: [],
+      chatState: "idle",
+    });
   },
 
   addSession(session: Session) {
@@ -76,6 +90,12 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   removeSession(sessionId: string) {
     set((s) => ({ sessions: s.sessions.filter((x) => x.id !== sessionId) }));
+  },
+
+  renameSession(sessionId: string, title: string) {
+    set((s) => ({
+      sessions: s.sessions.map((x) => (x.id === sessionId ? { ...x, title } : x)),
+    }));
   },
 
   messages: [],
@@ -153,6 +173,26 @@ export const useChatStore = create<ChatStore>((set, get) => ({
 
   getSessionDrafts(sessionId: string): PlanDraft[] {
     return get().drafts.filter((d) => d.sessionId === sessionId);
+  },
+
+  employeeDrafts: [],
+
+  addEmployeeDraft(approval: EmployeeActionApproval) {
+    set((s) => ({ employeeDrafts: [...s.employeeDrafts, approval] }));
+  },
+
+  updateEmployeeDraft(id: string, updates: Partial<EmployeeActionApproval>) {
+    set((s) => ({
+      employeeDrafts: s.employeeDrafts.map((d) => (d.id === id ? { ...d, ...updates } : d)),
+    }));
+  },
+
+  removeEmployeeDraft(id: string) {
+    set((s) => ({ employeeDrafts: s.employeeDrafts.filter((d) => d.id !== id) }));
+  },
+
+  getSessionEmployeeDrafts(sessionId: string): EmployeeActionApproval[] {
+    return get().employeeDrafts.filter((d) => d.sessionId === sessionId);
   },
 
   userScrolledUp: false,

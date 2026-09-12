@@ -20,6 +20,7 @@ import type {
   PlanningFilter,
   SandboxRun,
   SkillExecution,
+  UpdateDocumentInput,
 } from "@/lib/domain/types";
 
 const PLANNING_API = "/api/v1/internal/v1";
@@ -44,7 +45,7 @@ function toBackendDecision(decision: ApprovalDecisionInput["decision"]): string 
   return decision;
 }
 
-function toPlanningError(status: number, errBody: unknown): PlanningApiError {
+export function toPlanningError(status: number, errBody: unknown): PlanningApiError {
   const envelope = errBody as { error?: { code?: string; message?: string } } | null;
   const code = envelope?.error?.code ?? "INTERNAL_ERROR";
   const message = envelope?.error?.message ?? `Planning request failed: ${status}`;
@@ -134,8 +135,26 @@ export function createRealPlanningRepository(): PlanningRepository {
       }));
     },
 
-    async updateDocument(): Promise<PlanningDocument> {
-      throw new Error("updateDocument is not implemented; formal documents change via edit-confirm approvals");
+    async updateDocument(id: string, input: UpdateDocumentInput): Promise<PlanningDocument> {
+      const res = await fetch(`${PLANNING_API}/documents/${id}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...(input.title !== undefined ? { title: input.title } : {}),
+          ...(input.content !== undefined ? { body: input.content } : {}),
+        }),
+      });
+      if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
+      const row = (await res.json()) as DocumentRow;
+      return {
+        id: row.id,
+        title: row.title,
+        content: row.body,
+        category: row.type as PlanningDocument["category"],
+        version: row.version,
+        createdAt: row.createdAt,
+        updatedAt: row.updatedAt,
+      };
     },
 
     async decideApproval(input: ApprovalDecisionInput): Promise<ApprovalResult> {
@@ -200,6 +219,14 @@ export function createRealPlanningRepository(): PlanningRepository {
 
     async deleteDocument(documentId: string): Promise<void> {
       const res = await fetch(`${PLANNING_API}/documents/${documentId}`, { method: "DELETE" });
+      if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
+    },
+
+    async deleteVersion(documentId: string, versionId: string): Promise<void> {
+      const res = await fetch(
+        `${PLANNING_API}/documents/${documentId}/versions/${versionId}`,
+        { method: "DELETE" },
+      );
       if (!res.ok) throw toPlanningError(res.status, await res.json().catch(() => null));
     },
 

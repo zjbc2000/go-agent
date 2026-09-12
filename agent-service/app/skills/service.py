@@ -82,14 +82,10 @@ class SkillService:
                 context, document_id, document.current_version_id, plan, inputs, idempotency_key
             )
             return ExecutionRequestResult(approval=approval, run=None)
-        run = await self._request_run(
-            context, document_id, document.current_version_id, plan, inputs, idempotency_key
-        )
+        run = await self._request_run(context, document_id, document.current_version_id, plan, inputs, idempotency_key)
         return ExecutionRequestResult(approval=None, run=run)
 
-    async def confirm_execution(
-        self, context: RequestContext, approval_id: UUID, idempotency_key: str
-    ) -> SandboxRun:
+    async def confirm_execution(self, context: RequestContext, approval_id: UUID, idempotency_key: str) -> SandboxRun:
         """Confirm a pending approval, queue its run, and emit its outbox event.
 
         The whole confirmation is one user-scoped transaction: the approval is
@@ -98,9 +94,7 @@ class SkillService:
         learn of a run that was rolled back. Idempotent under a repeated
         ``idempotency_key`` (same run), conflict on a different key.
         """
-        return await self._execution.confirm_execution(
-            context, approval_id, idempotency_key, created_at=_utcnow()
-        )
+        return await self._execution.confirm_execution(context, approval_id, idempotency_key, created_at=_utcnow())
 
     def _compile_manifest(self, body: str, version_id: UUID, inputs: dict[str, Any]) -> ExecutionPlan:
         try:
@@ -122,12 +116,17 @@ class SkillService:
         return manifest
 
     def _compile_manifest_from_dict(
-        self, manifest: dict[str, Any], version_id: UUID, inputs: dict[str, Any],
+        self,
+        manifest: dict[str, Any],
+        version_id: UUID,
+        inputs: dict[str, Any],
     ) -> ExecutionPlan:
         return compile_skill(manifest, inputs, version_id=version_id)
 
     async def _validate_allowed_tools(
-        self, context: RequestContext, manifest: dict[str, Any],
+        self,
+        context: RequestContext,
+        manifest: dict[str, Any],
     ) -> None:
         """Gate: each allowed_tools entry must be a user-registered + enabled MCP tool."""
         allowed = manifest.get("allowed_tools", [])
@@ -152,7 +151,9 @@ class SkillService:
                 )
 
     async def _has_write_step(
-        self, context: RequestContext, steps: list[Any],
+        self,
+        context: RequestContext,
+        steps: list[Any],
     ) -> bool:
         """True when any step requires an execution approval.
 
@@ -177,9 +178,7 @@ class SkillService:
         inputs: dict[str, Any],
         idempotency_key: str,
     ) -> ExecutionApproval:
-        existing = await self._execution.get_approval_by_idempotency_key(
-            context, document_id, idempotency_key
-        )
+        existing = await self._execution.get_approval_by_idempotency_key(context, document_id, idempotency_key)
         if existing is not None:
             return existing
         now = _utcnow()
@@ -204,9 +203,7 @@ class SkillService:
         inputs: dict[str, Any],
         idempotency_key: str,
     ) -> SandboxRun:
-        existing = await self._execution.get_run_by_idempotency_key(
-            context, document_id, idempotency_key
-        )
+        existing = await self._execution.get_run_by_idempotency_key(context, document_id, idempotency_key)
         if existing is not None:
             return existing
         now = _utcnow()

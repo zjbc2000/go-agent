@@ -51,9 +51,7 @@ async def decide_approval(
     idempotency_key = body.get("idempotency_key")
 
     if decision not in _VALID_DECISIONS:
-        raise ApiError(
-            "VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False
-        )
+        raise ApiError("VALIDATION_FAILED", "decision must be one of approve, reject, regenerate.", False)
     if not isinstance(idempotency_key, str) or not idempotency_key.strip():
         raise ApiError("VALIDATION_FAILED", "idempotency_key is required.", False)
     if edited_payload is not None:
@@ -64,9 +62,7 @@ async def decide_approval(
         if not isinstance(edited_payload.get("body"), str) or not edited_payload["body"].strip():
             raise ApiError("VALIDATION_FAILED", "edited_payload.body is required.", False)
 
-    result = await service.decide_document_approval(
-        context, approval_id, decision, edited_payload, idempotency_key
-    )
+    result = await service.decide_document_approval(context, approval_id, decision, edited_payload, idempotency_key)
     return _approval_result_to_dict(result)
 
 
@@ -103,9 +99,7 @@ async def list_documents(
     filter_type: DocumentType | None = None
     if type is not None:
         if type not in _VALID_DOCUMENT_TYPES:
-            raise ApiError(
-                "VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False
-            )
+            raise ApiError("VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False)
         filter_type = cast(DocumentType, type)
     documents = await repository.list_active(context, filter_type)
     return [_document_to_dict(document) for document in documents]
@@ -121,6 +115,45 @@ async def delete_document(
     """Hard-delete the caller's document (RLS-gated to the owner)."""
     if not await repository.delete(context, document_id):
         raise ApiError("NOT_FOUND", "Document not found.", False)
+    return {"ok": True}
+
+
+@router.put("/internal/v1/documents/{document_id}")
+async def update_document(
+    document_id: UUID,
+    request: Request,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    repository: DocumentRepository = Depends(get_planning_repository),
+) -> dict:
+    """Edit the caller's document, appending a new version (title/body both required)."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False) from None
+    if not isinstance(body, dict):
+        raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False)
+    title = body.get("title")
+    content = body.get("body")
+    if not isinstance(title, str) or not title.strip():
+        raise ApiError("VALIDATION_FAILED", "title is required.", False)
+    if not isinstance(content, str) or not content.strip():
+        raise ApiError("VALIDATION_FAILED", "body is required.", False)
+    document = await repository.update_active(context, document_id, title.strip(), content.strip())
+    return _document_to_dict(document)
+
+
+@router.delete("/internal/v1/documents/{document_id}/versions/{version_id}")
+async def delete_document_version(
+    document_id: UUID,
+    version_id: UUID,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    repository: DocumentRepository = Depends(get_planning_repository),
+) -> dict:
+    """Delete a non-current version row; the current version is immutable."""
+    if not await repository.delete_version(context, document_id, version_id):
+        raise ApiError("NOT_FOUND", "Version not found or is the current version.", False)
     return {"ok": True}
 
 
@@ -178,9 +211,7 @@ async def create_draft(
     title = body.get("title")
     raw_body = body.get("body")
     if not isinstance(type, str) or type not in _VALID_DOCUMENT_TYPES:
-        raise ApiError(
-            "VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False
-        )
+        raise ApiError("VALIDATION_FAILED", "type must be one of memory, interest, task, skill.", False)
     if not isinstance(title, str) or not title.strip():
         raise ApiError("VALIDATION_FAILED", "title is required.", False)
     if not isinstance(raw_body, str) or not raw_body.strip():

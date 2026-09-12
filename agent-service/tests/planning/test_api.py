@@ -5,7 +5,6 @@ network calls are made. The internal-token gate mirrors the chat router, and the
 end-user JWT is decoded from a ``Bearer <uuid>`` token into the request context.
 """
 
-
 from sqlalchemy import text
 
 
@@ -86,9 +85,7 @@ async def test_decide_edit_confirm_returns_edited_document(client, service, user
     assert body["originalPayload"]["title"] == "original"
 
 
-async def test_decide_repeated_key_returns_original_result(
-    client, service, user_context, api_headers, db_session
-):
+async def test_decide_repeated_key_returns_original_result(client, service, user_context, api_headers, db_session):
     draft = await _create_draft(service, user_context)
     path = f"/internal/v1/approvals/{draft.approval_id}/decisions"
     body = {"decision": "approve", "idempotency_key": "api-repeat"}
@@ -130,6 +127,4 @@ async def test_decide_reject_returns_no_document(client, service, user_context, 
 
 
 async def _create_draft(service, user_context):
-    return await service.create_document_draft(
-        user_context, type="task", title="original", body="model"
-    )
+    return await service.create_document_draft(user_context, type="task", title="original", body="model")

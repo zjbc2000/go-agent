@@ -46,7 +46,7 @@ export function MessageList() {
         onScroll={handleScroll}
         className="h-full overflow-y-auto"
       >
-        <div className="py-4">
+        <div className="max-w-4xl mx-auto py-4">
           {messages.map((msg) => (
             <MessageBubble key={msg.id} message={msg} />
           ))}

@@ -96,9 +96,7 @@ class OutboxEvent(Base):
     """A transactional outbox row the service publishes on the user's behalf (Task 2)."""
 
     __tablename__ = "outbox_events"
-    __table_args__ = (
-        CheckConstraint("status in ('pending', 'published')", name="outbox_events_status_check"),
-    )
+    __table_args__ = (CheckConstraint("status in ('pending', 'published')", name="outbox_events_status_check"),)
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)

@@ -59,9 +59,7 @@ async def test_non_skill_document_is_invalid(service, repository, user_context):
 
 async def test_skill_with_no_steps_is_invalid(service, repository, user_context):
     manifest = {"schema_version": 1, "steps": []}
-    document = await repository.create_active(
-        user_context, type="skill", title="empty", body=json.dumps(manifest)
-    )
+    document = await repository.create_active(user_context, type="skill", title="empty", body=json.dumps(manifest))
     with pytest.raises(ApiError) as excinfo:
         await service.request_execution(user_context, document.id, {}, "key-2")
     assert excinfo.value.code == "SKILL_INVALID"
@@ -85,9 +83,7 @@ async def test_approval_and_run_store_ciphertext_only(
     await service.request_execution(
         user_context, active_read_skill, {"document_id": "00000000-0000-0000-0000-000000000010"}, "cipher-2"
     )
-    approval = (
-        await db_session.execute(text("select inputs_ciphertext from execution_approvals"))
-    ).one()
+    approval = (await db_session.execute(text("select inputs_ciphertext from execution_approvals"))).one()
     assert "sensitive-title" not in approval[0]
     run = (await db_session.execute(text("select inputs_ciphertext from sandbox_runs"))).one()
     assert run[0] and "sensitive-title" not in run[0]

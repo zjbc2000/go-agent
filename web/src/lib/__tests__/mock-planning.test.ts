@@ -48,7 +48,7 @@ describe("MockPlanningRepository", () => {
     const restored = docs.find((d) => d.id === "doc_1");
     expect(restored?.title).toBe(target.title);
     expect(restored?.content).toBe(target.content);
-    // Version number should have increased
-    expect(restored?.version).toBeGreaterThan(target.version);
+    // Restore switches current_version to the target (no new version row).
+    expect(restored?.version).toBe(target.version);
   });
 });

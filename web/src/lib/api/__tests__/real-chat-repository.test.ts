@@ -296,4 +296,46 @@ describe("RealChatRepository (run-first)", () => {
     expect(events.some((e) => (e as ChatEvent).type === "draft")).toBe(true);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it("createSession POSTs title + employee_id for an employee-bound session", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "sess-1",
+        title: "[秘书]苏曼",
+        createdAt: "2026-01-01T00:00:00Z",
+        lastMessageAt: "2026-01-01T00:00:00Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const session = await createRealChatRepository().createSession("[秘书]苏曼", "emp-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/internal/v1/sessions",
+      expect.objectContaining({
+        method: "POST",
+        body: JSON.stringify({ title: "[秘书]苏曼", employee_id: "emp-1" }),
+      }),
+    );
+    expect(session.title).toBe("[秘书]苏曼");
+  });
+
+  it("createSession with no args sends an empty POST body", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "sess-2",
+        title: "New chat",
+        createdAt: "2026-01-01T00:00:00Z",
+        lastMessageAt: "2026-01-01T00:00:00Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createRealChatRepository().createSession();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/internal/v1/sessions",
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
 });

@@ -34,7 +34,7 @@ export function PlanDraftCard({ draft, onRefresh }: PlanDraftCardProps) {
   const [isEditing, setIsEditing] = useState(false);
   const [fieldError, setFieldError] = useState<string | null>(null);
   const { updateDraft, removeDraft } = useChatStore();
-  const { planning: planningRepo } = useRepositories();
+  const { planning: planningRepo, chat: chatRepo } = useRepositories();
 
   const handleConfirm = async () => {
     try {
@@ -50,6 +50,9 @@ export function PlanDraftCard({ draft, onRefresh }: PlanDraftCardProps) {
           ? { title: result.document.title, content: result.document.content }
           : {}),
       });
+      // The backend renames the session after an approval confirms ("兴趣·xxx"), so
+      // refresh the session list to surface the new title in the sidebar.
+      useChatStore.getState().loadSessions(chatRepo).catch(() => {});
       toast.success("规划已确认，可在规划页查看");
     } catch (error) {
       applyDecisionError(error, "pending_confirmation");

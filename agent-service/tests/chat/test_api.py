@@ -114,9 +114,7 @@ async def test_stream_deltas_are_encrypted_at_rest(client, owned_session, api_he
     assert all(FAKE_PROVIDER_TEXT[:8] not in row[0] for row in raw_events)
 
 
-async def test_reconnect_resumes_run_without_second_user_message(
-    client, owned_session, api_headers, db_session
-):
+async def test_reconnect_resumes_run_without_second_user_message(client, owned_session, api_headers, db_session):
     path = f"/internal/v1/sessions/{owned_session}/runs"
     body = {"content": "hello", "idempotency_key": "k-5"}
 
@@ -157,9 +155,7 @@ async def test_concurrent_same_key_streams_persist_single_generation(
     Both consumers start on the same queued run; at most one may own generation, so
     the persisted stream holds exactly one ``run.started`` and one set of deltas.
     """
-    service = ChatService(
-        chat_repository, DeterministicProvider(), timedelta(days=7), graph=assistant_graph
-    )
+    service = ChatService(chat_repository, DeterministicProvider(), timedelta(days=7), graph=assistant_graph)
     created = await service.create_run(user_context, owned_session, "race", "race-key")
     run_id = created.run_id
 
@@ -302,3 +298,69 @@ async def test_delete_session_requires_internal_token(client, owned_session, use
         headers={"Authorization": f"Bearer {user_context.user_id}"},
     )
     assert resp.status_code == 401
+
+
+async def test_rename_session_updates_title(client, api_headers, user_context, owned_session):
+    resp = client.patch(
+        f"/internal/v1/sessions/{owned_session}",
+        headers={**api_headers, "Content-Type": "application/json"},
+        json={"title": "兴趣·学摄影"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"ok": True}
+    listed = client.get("/internal/v1/sessions", headers=api_headers).json()
+    titles = {s["id"]: s["title"] for s in listed}
+    assert titles.get(str(owned_session)) == "兴趣·学摄影"
+
+
+async def test_rename_session_requires_title(client, api_headers, owned_session):
+    resp = client.patch(
+        f"/internal/v1/sessions/{owned_session}",
+        headers={**api_headers, "Content-Type": "application/json"},
+        json={},
+    )
+    assert resp.status_code == 422
+    assert resp.json()["error"]["code"] == "VALIDATION_FAILED"
+
+
+async def test_rename_session_not_owned_returns_404(client, api_headers, user_b_context, db_session):
+    sid = uuid.uuid4()
+    await db_session.execute(
+        text("insert into sessions (id, user_id, title) values (:id, :uid, 'other')"),
+        {"id": sid, "uid": user_b_context.user_id},
+    )
+    await db_session.commit()
+    resp = client.patch(
+        f"/internal/v1/sessions/{sid}",
+        headers={**api_headers, "Content-Type": "application/json"},
+        json={"title": "hijack"},
+    )
+    assert resp.status_code == 404
+    assert resp.json()["error"]["code"] == "NOT_FOUND"
+
+
+async def test_create_session_binds_employee(client, api_headers, user_context, db_session, cipher, chat_repository):
+    """POST /sessions with employee_id creates an employee-bound session."""
+    # The employee FK references auth.users(id); provision the caller first.
+    await db_session.execute(
+        text("insert into auth.users (id) values (:id) on conflict (id) do nothing"),
+        {"id": user_context.user_id},
+    )
+    await db_session.commit()
+
+    from app.repositories.employees import EmployeeRepository
+
+    employee_repo = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
+    employee = await employee_repo.create(user_context, "苏曼", "秘书", "负责安排日程与会议纪要")
+
+    resp = client.post(
+        "/internal/v1/sessions",
+        headers={**api_headers, "Content-Type": "application/json"},
+        json={"title": "[秘书]苏曼", "employee_id": str(employee.id)},
+    )
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["title"] == "[秘书]苏曼"
+
+    bound = await chat_repository.get_session_employee_id(user_context, uuid.UUID(body["id"]))
+    assert bound == employee.id

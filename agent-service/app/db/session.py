@@ -51,9 +51,7 @@ async def user_scoped_session(
                 text("SELECT set_config('request.jwt.claim.sub', :sub, true)"),
                 {"sub": str(context.user_id)},
             )
-            await session.execute(
-                text("SELECT set_config('request.jwt.claim.role', 'authenticated', true)")
-            )
+            await session.execute(text("SELECT set_config('request.jwt.claim.role', 'authenticated', true)"))
             yield session
 
 

@@ -23,6 +23,8 @@ export interface Session {
   title: string;
   lastMessageAt: string;
   createdAt: string;
+  /** 员工对话会话的职位（如「秘书」）；非员工会话为 undefined。 */
+  employeePosition?: string;
 }
 
 // --- Chat Events (SSE stream) ---
@@ -31,6 +33,7 @@ export type ChatEvent =
   | { type: "message-start"; messageId: string }
   | { type: "token"; messageId: string; text: string }
   | { type: "draft"; draft: PlanDraft }
+  | { type: "employee-action"; approval: EmployeeActionApproval }
   | { type: "done"; messageId: string }
   | { type: "error"; code: string; message: string };
 
@@ -198,6 +201,55 @@ export interface ExecutionDecisionResult {
   decision: string;
   error?: ExecutionDecisionError;
   run?: SandboxRun;
+}
+
+// --- Company / employees ---
+
+export type EmployeeStatus = "active" | "inactive";
+export type EmployeeActionKind = "fire" | "rehire" | "adjust_position";
+
+export interface Employee {
+  id: string;
+  name: string;
+  position: string;
+  prompt: string;
+  status: EmployeeStatus;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateEmployeeInput {
+  name: string;
+  position: string;
+  prompt: string;
+}
+
+export interface UpdateEmployeeInput {
+  name?: string;
+  position?: string;
+  prompt?: string;
+}
+
+export type EmployeeApprovalStatus = "pending" | "confirmed" | "rejected" | "expired";
+
+/** A pending employee action approval rendered as a HITL card (chat or company page). */
+export interface EmployeeActionApproval {
+  id: string; // approvalId
+  sessionId?: string; // present for chat-driven approvals
+  messageId?: string;
+  employeeId: string;
+  action: EmployeeActionKind;
+  name: string; // employee name at proposal time
+  position: string | null; // current position at proposal time
+  positionToSet: string | null; // target position for adjust_position
+  status: EmployeeApprovalStatus;
+  createdAt: string;
+}
+
+export interface EmployeeDecisionResult {
+  approvalId: string;
+  decision: string;
+  employee: Employee | null;
 }
 
 // --- Auth ---

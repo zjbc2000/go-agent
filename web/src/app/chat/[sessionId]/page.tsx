@@ -9,6 +9,7 @@ import { MessageList } from "@/components/chat/MessageList";
 import { Composer } from "@/components/chat/Composer";
 import { ConnectionBanner } from "@/components/chat/ConnectionBanner";
 import { PlanDraftCard } from "@/components/approval/PlanDraftCard";
+import { EmployeeActionCard } from "@/components/approval/EmployeeActionCard";
 import { Loader2 } from "lucide-react";
 
 export default function ChatSessionPage({
@@ -24,6 +25,7 @@ export default function ChatSessionPage({
     sessions,
     messages,
     drafts,
+    employeeDrafts,
   } = useChatStore();
   const { chat: chatRepo } = useRepositories();
 
@@ -43,6 +45,7 @@ export default function ChatSessionPage({
 
   const session = sessions.find((s) => s.id === sessionId);
   const sessionDrafts = drafts.filter((d) => d.sessionId === sessionId);
+  const sessionEmployeeDrafts = employeeDrafts.filter((d) => d.sessionId === sessionId);
 
   if (!session && sessions.length === 0) {
     return (
@@ -66,6 +69,15 @@ export default function ChatSessionPage({
           <div className="border-t border-border bg-surface/50 py-2 space-y-2">
             {sessionDrafts.map((draft) => (
               <PlanDraftCard key={draft.id} draft={draft} />
+            ))}
+          </div>
+        )}
+
+        {/* Employee action approval cards */}
+        {sessionEmployeeDrafts.length > 0 && (
+          <div className="border-t border-border bg-surface/50 py-2 space-y-2">
+            {sessionEmployeeDrafts.map((approval) => (
+              <EmployeeActionCard key={approval.id} approval={approval} />
             ))}
           </div>
         )}

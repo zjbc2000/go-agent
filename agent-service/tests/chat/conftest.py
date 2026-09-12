@@ -34,6 +34,16 @@ DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:pos
 
 _CHAT_TABLES = "public.stream_events, public.messages, public.agent_runs, public.sessions"
 
+# The test suite TRUNCATEs chat tables before each test. That is safe ONLY against an
+# isolated test database. If TEST_DATABASE_URL is not set and the default points at the
+# dev database (`/postgres`), refuse to run — otherwise the suite silently wipes the
+# developer's real sessions/messages. Set TEST_DATABASE_URL to an isolated test DB.
+if os.getenv("TEST_DATABASE_URL") is None and DATABASE_URL.rstrip("/").endswith("/postgres"):
+    raise RuntimeError(
+        "Refusing to run tests against the dev database. Set TEST_DATABASE_URL to an "
+        "isolated test database (e.g. postgres_test)."
+    )
+
 
 def _context(user_id: uuid.UUID) -> RequestContext:
     return RequestContext(user_id=user_id, role="user", request_id=new_request_id())
@@ -62,9 +72,7 @@ async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 def chat_repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> ChatRepository:
-    return ChatRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
-    )
+    return ChatRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher)
 
 
 @pytest.fixture
@@ -73,9 +81,7 @@ def assistant_graph(engine: AsyncEngine, cipher: LocalEnvelopeCipher):
     from app.chat.provider import DeterministicProvider
     from app.repositories.planning import DocumentRepository
 
-    documents = DocumentRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
-    )
+    documents = DocumentRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher)
     return build_assistant_graph(DeterministicProvider(delay_seconds=0.0), documents)
 
 
@@ -95,6 +101,7 @@ def user_b_context() -> RequestContext:
 
 
 # --- API fixtures ------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class SseEvent:
@@ -140,8 +147,14 @@ def _fake_role_loader(user_id: uuid.UUID) -> UserRole:
 @pytest.fixture
 def app_settings() -> Settings:
     # Disable the outbox poller so entering the TestClient never starts the
-    # RabbitMQ background task during unrelated suites.
-    return Settings(internal_token=TEST_INTERNAL_TOKEN, outbox_poller_enabled=False)
+    # RabbitMQ background task during unrelated suites. Point the app at the SAME
+    # test database the repository fixtures use, so the API layer and the repo layer
+    # agree (otherwise API tests hit the dev DB).
+    return Settings(
+        internal_token=TEST_INTERNAL_TOKEN,
+        outbox_poller_enabled=False,
+        database_url=DATABASE_URL,
+    )
 
 
 @pytest.fixture

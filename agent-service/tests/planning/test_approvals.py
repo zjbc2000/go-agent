@@ -86,9 +86,7 @@ async def test_reject_preserves_draft_and_writes_no_document(service, user_conte
     documents = await db_session.scalar(text("select count(*) from documents"))
     assert documents == 0
     row = (
-        await db_session.execute(
-            text("select status from document_drafts where id = :id"), {"id": draft.draft_id}
-        )
+        await db_session.execute(text("select status from document_drafts where id = :id"), {"id": draft.draft_id})
     ).one()
     assert row[0] == "pending"
     action = await db_session.scalar(text("select action from audit_logs"))
@@ -157,9 +155,7 @@ async def test_draft_creation_sets_payload_sha256_and_encrypts_draft(service, us
     assert "sensitive body" not in row[1]
 
 
-async def test_approve_emits_run_completed_for_linked_run(
-    service, chat_repository, user_context, db_session
-):
+async def test_approve_emits_run_completed_for_linked_run(service, chat_repository, user_context, db_session):
     created = await chat_repository.create_run(user_context, uuid.uuid4(), "draft prompt", "run-key-1")
     draft = await service.create_document_draft(
         user_context, type="task", title="proposal", body="confirmed body", run_id=created.run_id

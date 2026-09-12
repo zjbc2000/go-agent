@@ -10,7 +10,18 @@
 // Both track the SSE Last-Event-ID cursor so the caller can persist it between calls.
 // ============================================================
 
-import type { ChatEvent, CreatedRun, Message, MessageStatus, RunSnapshot, RunStatus, RunStream, RunStreamOptions, Session } from "@/lib/domain/types";
+import type {
+  ChatEvent,
+  CreatedRun,
+  EmployeeActionApproval,
+  Message,
+  MessageStatus,
+  RunSnapshot,
+  RunStatus,
+  RunStream,
+  RunStreamOptions,
+  Session,
+} from "@/lib/domain/types";
 import type { ChatRepository } from "@/lib/domain/repositories";
 
 const CHAT_API = "/api/v1/internal/v1";
@@ -76,6 +87,11 @@ function toChatEvent(frame: SseFrame): ChatEvent | null {
     title?: string;
     body?: string;
     createdAt?: string;
+    action?: string;
+    employeeId?: string;
+    name?: string;
+    position?: string | null;
+    positionToSet?: string | null;
   };
   try {
     payload = JSON.parse(frame.data);
@@ -99,6 +115,22 @@ function toChatEvent(frame: SseFrame): ChatEvent | null {
           content: payload.body ?? "",
           category: (payload.type as "memory" | "interest" | "task" | "skill") ?? "interest",
           status: "pending_confirmation",
+          createdAt: payload.createdAt ?? new Date().toISOString(),
+        },
+      };
+    case "employee.action":
+      return {
+        type: "employee-action",
+        approval: {
+          id: payload.approvalId ?? "",
+          sessionId: payload.sessionId ?? "",
+          messageId: payload.messageId ?? "",
+          employeeId: payload.employeeId ?? "",
+          action: (payload.action as EmployeeActionApproval["action"]) ?? "fire",
+          name: payload.name ?? "",
+          position: payload.position ?? null,
+          positionToSet: payload.positionToSet ?? null,
+          status: "pending",
           createdAt: payload.createdAt ?? new Date().toISOString(),
         },
       };
@@ -398,8 +430,19 @@ export function createRealChatRepository(): ChatRepository {
       return { runId, status, content };
     },
 
-    async createSession(): Promise<Session> {
-      const res = await fetch(`${CHAT_API}/sessions`, { method: "POST" });
+    async createSession(title?: string, employeeId?: string): Promise<Session> {
+      const body: { title?: string; employee_id?: string } = {};
+      if (title !== undefined) body.title = title;
+      if (employeeId !== undefined) body.employee_id = employeeId;
+      const res = await fetch(`${CHAT_API}/sessions`, {
+        method: "POST",
+        ...(Object.keys(body).length > 0
+          ? {
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(body),
+            }
+          : {}),
+      });
       if (!res.ok) throw new Error("Failed to create session");
       const row = (await res.json()) as {
         id: string;
@@ -418,6 +461,15 @@ export function createRealChatRepository(): ChatRepository {
     async deleteSession(sessionId: string): Promise<void> {
       const res = await fetch(`${CHAT_API}/sessions/${sessionId}`, { method: "DELETE" });
       if (!res.ok) throw new Error("Failed to delete session");
+    },
+
+    async renameSession(sessionId: string, title: string): Promise<void> {
+      const res = await fetch(`${CHAT_API}/sessions/${sessionId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title }),
+      });
+      if (!res.ok) throw new Error("Failed to rename session");
     },
   };
 }

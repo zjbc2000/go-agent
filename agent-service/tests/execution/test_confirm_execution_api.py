@@ -50,9 +50,7 @@ async def test_confirm_expired_approval_returns_approval_expired(
     assert runs == 0
 
 
-async def test_confirm_repeated_key_is_idempotent(
-    client, service, user_context, api_headers, active_skill, db_session
-):
+async def test_confirm_repeated_key_is_idempotent(client, service, user_context, api_headers, active_skill, db_session):
     result = await service.request_execution(user_context, active_skill, {"title": "x"}, "req-3")
     assert result.approval is not None
     path = f"/internal/v1/skills/approvals/{result.approval.id}/decisions"
@@ -65,9 +63,7 @@ async def test_confirm_repeated_key_is_idempotent(
     assert runs == 1
 
 
-async def test_confirm_rejects_non_approve_decision(
-    client, service, user_context, api_headers, active_skill
-):
+async def test_confirm_rejects_non_approve_decision(client, service, user_context, api_headers, active_skill):
     """Execution approvals have no reject/regenerate path in this MVP."""
     result = await service.request_execution(user_context, active_skill, {"title": "x"}, "req-4")
     assert result.approval is not None

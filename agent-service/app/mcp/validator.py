@@ -26,9 +26,7 @@ class ValidationResult:
 class McpValidator:
     """Validates untrusted MCP tool output against a registered JSON Schema."""
 
-    def validate_output(
-        self, output_schema: dict[str, Any], raw: dict[str, Any]
-    ) -> ValidationResult:
+    def validate_output(self, output_schema: dict[str, Any], raw: dict[str, Any]) -> ValidationResult:
         """Validate ``raw`` against ``output_schema``.
 
         On success returns the data. On failure returns a typed error — raw

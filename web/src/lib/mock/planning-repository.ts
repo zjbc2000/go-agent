@@ -208,13 +208,14 @@ export function createMockPlanningRepository(): PlanningRepository {
       const target = docVersions.find((v) => v.id === versionId);
       if (!target) throw new Error(`Version ${versionId} not found`);
 
+      // Switch the document's current version to the target (no new version row).
       documents = documents.map((d) =>
         d.id === documentId
           ? {
               ...d,
               title: target.title,
               content: target.content,
-              version: d.version + 1,
+              version: target.version,
               updatedAt: new Date().toISOString(),
             }
           : d,
@@ -225,6 +226,18 @@ export function createMockPlanningRepository(): PlanningRepository {
       await delay(150);
       documents = documents.filter((d) => d.id !== documentId);
       delete versions[documentId];
+    },
+
+    async deleteVersion(documentId: string, versionId: string): Promise<void> {
+      await delay(150);
+      const doc = documents.find((d) => d.id === documentId);
+      const list = versions[documentId] ?? [];
+      const target = list.find((v) => v.id === versionId);
+      if (!target) throw new Error(`Version ${versionId} not found`);
+      if (doc && target.version === doc.version) {
+        throw new Error("Cannot delete the current version");
+      }
+      versions[documentId] = list.filter((v) => v.id !== versionId);
     },
 
     async requestExecution(

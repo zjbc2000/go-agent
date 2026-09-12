@@ -42,7 +42,6 @@ class ModelProvider(Protocol):
     async def complete(self, messages: list[ProviderMessage], *, json_schema: bool = False) -> str: ...
 
 
-
 class DeterministicProvider:
     """An offline provider that yields a fixed token sequence.
 
@@ -125,15 +124,11 @@ class OpenAICompatibleProvider:
             payload["response_format"] = {"type": "json_object"}
         try:
             async with httpx.AsyncClient(timeout=60.0) as client:
-                response = await client.post(
-                    f"{self._base_url}/chat/completions", json=payload, headers=headers
-                )
+                response = await client.post(f"{self._base_url}/chat/completions", json=payload, headers=headers)
                 if response.status_code == 400 and json_schema:
                     # Some OpenAI-compatible endpoints reject response_format; retry plain.
                     payload.pop("response_format", None)
-                    response = await client.post(
-                        f"{self._base_url}/chat/completions", json=payload, headers=headers
-                    )
+                    response = await client.post(f"{self._base_url}/chat/completions", json=payload, headers=headers)
                 response.raise_for_status()
                 data = response.json()
                 return data["choices"][0]["message"]["content"]
@@ -144,8 +139,6 @@ class OpenAICompatibleProvider:
 def build_provider(settings: Settings) -> ModelProvider:
     """Return the configured provider, or the deterministic fallback when unset."""
     if settings.provider_base_url and settings.provider_api_key:
-        return OpenAICompatibleProvider(
-            settings.provider_base_url, settings.provider_api_key, settings.provider_model
-        )
+        return OpenAICompatibleProvider(settings.provider_base_url, settings.provider_api_key, settings.provider_model)
     # A per-chunk delay keeps the dev/E2E stream observable and interruptible.
     return DeterministicProvider(delay_seconds=0.25)

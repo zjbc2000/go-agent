@@ -41,6 +41,16 @@ _EXECUTION_TABLES = (
     "public.document_versions, public.documents"
 )
 
+# The test suite TRUNCATEs execution/planning/chat tables before each test. That is
+# safe ONLY against an isolated test database. If TEST_DATABASE_URL is not set and the
+# default points at the dev database (`/postgres`), refuse to run — otherwise the suite
+# silently wipes the developer's real data. Set TEST_DATABASE_URL to an isolated test DB.
+if os.getenv("TEST_DATABASE_URL") is None and DATABASE_URL.rstrip("/").endswith("/postgres"):
+    raise RuntimeError(
+        "Refusing to run tests against the dev database. Set TEST_DATABASE_URL to an "
+        "isolated test database (e.g. postgres_test)."
+    )
+
 _WRITE_MANIFEST = {
     "schema_version": 1,
     "steps": [
@@ -90,16 +100,12 @@ async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 def repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> DocumentRepository:
-    return DocumentRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
-    )
+    return DocumentRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher)
 
 
 @pytest.fixture
 def execution_repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> ExecutionRepository:
-    return ExecutionRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
-    )
+    return ExecutionRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher)
 
 
 @pytest.fixture
@@ -145,9 +151,7 @@ async def approval(service: SkillService, user_context: RequestContext, active_s
 
 
 async def _create_skill(repository: DocumentRepository, user: RequestContext, manifest: dict) -> uuid.UUID:
-    document = await repository.create_active(
-        user, type="skill", title="skill", body=json.dumps(manifest)
-    )
+    document = await repository.create_active(user, type="skill", title="skill", body=json.dumps(manifest))
     return document.id
 
 
@@ -165,6 +169,7 @@ async def active_read_skill(repository: DocumentRepository, user_context: Reques
 
 # --- API fixtures ------------------------------------------------------------
 
+
 def _fake_jwt_verifier(token: str) -> dict:
     """Verify a test token of the form ``Bearer <uuid>`` without any network call."""
     try:
@@ -181,8 +186,13 @@ def _fake_role_loader(user_id: uuid.UUID) -> UserRole:
 @pytest.fixture
 def app_settings() -> Settings:
     # Disable the outbox poller so entering the TestClient never starts the
-    # RabbitMQ background task; tests drain the outbox explicitly.
-    return Settings(internal_token=TEST_INTERNAL_TOKEN, outbox_poller_enabled=False)
+    # RabbitMQ background task; tests drain the outbox explicitly. Point the app at
+    # the SAME test database the repository fixtures use.
+    return Settings(
+        internal_token=TEST_INTERNAL_TOKEN,
+        outbox_poller_enabled=False,
+        database_url=DATABASE_URL,
+    )
 
 
 @pytest.fixture

@@ -105,9 +105,7 @@ def _make_jwks_verifier() -> JwtVerifier:
         except StopIteration:
             raise ApiError("AUTH_REQUIRED", "Invalid authentication token.", False) from None
         try:
-            return pyjwt.decode(
-                token, _key_from_jwk(key), algorithms=[algorithm], audience="authenticated"
-            )
+            return pyjwt.decode(token, _key_from_jwk(key), algorithms=[algorithm], audience="authenticated")
         except (pyjwt.PyJWTError, KeyError, TypeError, ValueError):
             raise ApiError("AUTH_REQUIRED", "Invalid authentication token.", False) from None
 

@@ -23,9 +23,7 @@ from app.skills.compiler import compile_skill
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
-DATABASE_URL = os.getenv(
-    "TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres"
-)
+DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres")
 
 GRANT_SECRET = "test-mcp-broker-secret"
 
@@ -42,8 +40,7 @@ _MCP_READ_MANIFEST = {
     "schema_version": 1,
     "allowed_tools": ["echo.readonly"],
     "steps": [
-        {"id": "mcp1", "tool": "echo.readonly",
-         "input": {"message": "{{msg}}"}},
+        {"id": "mcp1", "tool": "echo.readonly", "input": {"message": "{{msg}}"}},
     ],
 }
 
@@ -51,14 +48,12 @@ _MCP_WRITE_MANIFEST = {
     "schema_version": 1,
     "allowed_tools": ["db.write"],
     "steps": [
-        {"id": "mcp2", "tool": "db.write",
-         "input": {"key": "{{key}}", "value": "{{value}}"}},
+        {"id": "mcp2", "tool": "db.write", "input": {"key": "{{key}}", "value": "{{value}}"}},
     ],
 }
 
 
-async def _seed_mcp_manifest(cipher: LocalEnvelopeCipher, engine: AsyncEngine,
-                             user_id: uuid.UUID) -> None:
+async def _seed_mcp_manifest(cipher: LocalEnvelopeCipher, engine: AsyncEngine, user_id: uuid.UUID) -> None:
     """Register an MCP server with tools in the DB (user-scoped)."""
     from app.models.execution import McpServer as McpServerRecord
     from app.models.execution import McpTool as McpToolRecord
@@ -66,23 +61,41 @@ async def _seed_mcp_manifest(cipher: LocalEnvelopeCipher, engine: AsyncEngine,
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         # Use service-role style insert for test seeding.
         sid = uuid.uuid4()
-        session.add(McpServerRecord(
-            id=sid, user_id=user_id, name="test-mcp",
-            image=f"oci://example/test@sha256:{PINNED_DIGEST}",
-            enabled=True, provenance="test", sbom="test",
-        ))
-        session.add(McpToolRecord(
-            id=uuid.uuid4(), user_id=user_id, server_id=sid,
-            tool_id="echo.readonly", enabled=True, mutable=False,
-            input_schema={"type": "object", "properties": {"message": {"type": "string"}}},
-            output_schema={"type": "object", "properties": {"echo": {"type": "string"}}},
-        ))
-        session.add(McpToolRecord(
-            id=uuid.uuid4(), user_id=user_id, server_id=sid,
-            tool_id="db.write", enabled=True, mutable=True,
-            input_schema={"type": "object"},
-            output_schema={"type": "object", "properties": {"written": {"type": "boolean"}}},
-        ))
+        session.add(
+            McpServerRecord(
+                id=sid,
+                user_id=user_id,
+                name="test-mcp",
+                image=f"oci://example/test@sha256:{PINNED_DIGEST}",
+                enabled=True,
+                provenance="test",
+                sbom="test",
+            )
+        )
+        session.add(
+            McpToolRecord(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                server_id=sid,
+                tool_id="echo.readonly",
+                enabled=True,
+                mutable=False,
+                input_schema={"type": "object", "properties": {"message": {"type": "string"}}},
+                output_schema={"type": "object", "properties": {"echo": {"type": "string"}}},
+            )
+        )
+        session.add(
+            McpToolRecord(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                server_id=sid,
+                tool_id="db.write",
+                enabled=True,
+                mutable=True,
+                input_schema={"type": "object"},
+                output_schema={"type": "object", "properties": {"written": {"type": "boolean"}}},
+            )
+        )
         await session.commit()
 
 
@@ -95,8 +108,13 @@ async def _provision_user(db_session: AsyncSession, user_id: uuid.UUID) -> None:
 
 
 async def _seed_run_with_plan_hash(
-    engine: AsyncEngine, cipher: LocalEnvelopeCipher, user_id: uuid.UUID,
-    manifest: dict, inputs: dict, *, with_approval: bool = False,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    user_id: uuid.UUID,
+    manifest: dict,
+    inputs: dict,
+    *,
+    with_approval: bool = False,
 ) -> tuple[str, str, str, str, str]:
     """Seed a running sandbox_run for an MCP skill."""
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
@@ -109,15 +127,19 @@ async def _seed_run_with_plan_hash(
         ver_id = uuid.uuid4()
         plan = compile_skill(manifest, inputs, version_id=ver_id)
         await session.execute(
-            text("insert into documents (id, user_id, type, current_version, status, "
-                 "title_ciphertext, body_ciphertext) "
-                 "values (:id, :uid, 'skill', 1, 'active', :title, :body)"),
+            text(
+                "insert into documents (id, user_id, type, current_version, status, "
+                "title_ciphertext, body_ciphertext) "
+                "values (:id, :uid, 'skill', 1, 'active', :title, :body)"
+            ),
             {"id": doc_id, "uid": user_id, "title": body_ct, "body": body_ct},
         )
         await session.execute(
-            text("insert into document_versions (id, user_id, document_id, version, "
-                 "title_ciphertext, body_ciphertext) "
-                 "values (:id, :uid, :doc, 1, :title, :body)"),
+            text(
+                "insert into document_versions (id, user_id, document_id, version, "
+                "title_ciphertext, body_ciphertext) "
+                "values (:id, :uid, :doc, 1, :title, :body)"
+            ),
             {"id": ver_id, "uid": user_id, "doc": doc_id, "title": body_ct, "body": body_ct},
         )
         inputs_ct = cipher.encrypt(json.dumps({"inputs": inputs}))
@@ -126,26 +148,37 @@ async def _seed_run_with_plan_hash(
         if with_approval:
             approval_id = uuid.uuid4()
             await session.execute(
-                text("insert into execution_approvals "
-                     "(id, user_id, document_id, version_id, plan_hash, inputs_ciphertext, "
-                     "status, decision, expires_at, decided_at) "
-                     "values (:id, :uid, :doc, :ver, :hash, :ct, 'confirmed', 'confirmed', "
-                     "now() + interval '10 minutes', now())"),
-                {"id": approval_id, "uid": user_id, "doc": doc_id, "ver": ver_id,
-                 "hash": plan.hash, "ct": inputs_ct},
+                text(
+                    "insert into execution_approvals "
+                    "(id, user_id, document_id, version_id, plan_hash, inputs_ciphertext, "
+                    "status, decision, expires_at, decided_at) "
+                    "values (:id, :uid, :doc, :ver, :hash, :ct, 'confirmed', 'confirmed', "
+                    "now() + interval '10 minutes', now())"
+                ),
+                {"id": approval_id, "uid": user_id, "doc": doc_id, "ver": ver_id, "hash": plan.hash, "ct": inputs_ct},
             )
         await session.execute(
-            text("insert into sandbox_runs (id, user_id, document_id, version_id, plan_hash, "
-                 "status, inputs_ciphertext, claimed_at, approval_id) "
-                 "values (:id, :uid, :doc, :ver, :hash, 'running', :ct, now(), :aid)"),
-            {"id": run_id, "uid": user_id, "doc": doc_id, "ver": ver_id,
-             "hash": plan.hash, "ct": inputs_ct, "aid": approval_id},
+            text(
+                "insert into sandbox_runs (id, user_id, document_id, version_id, plan_hash, "
+                "status, inputs_ciphertext, claimed_at, approval_id) "
+                "values (:id, :uid, :doc, :ver, :hash, 'running', :ct, now(), :aid)"
+            ),
+            {
+                "id": run_id,
+                "uid": user_id,
+                "doc": doc_id,
+                "ver": ver_id,
+                "hash": plan.hash,
+                "ct": inputs_ct,
+                "aid": approval_id,
+            },
         )
         await session.commit()
     return str(run_id), str(doc_id), str(ver_id), plan.hash, str(user_id)
 
 
 # ---- Fixtures ----
+
 
 @pytest.fixture(autouse=True)
 async def _clean(engine: AsyncEngine) -> None:
@@ -157,15 +190,15 @@ async def _clean(engine: AsyncEngine) -> None:
 @pytest.fixture
 def engine() -> AsyncEngine:
     from sqlalchemy.ext.asyncio import create_async_engine
+
     return create_async_engine(DATABASE_URL, pool_pre_ping=True)
 
 
 @pytest.fixture
 def cipher() -> LocalEnvelopeCipher:
     import base64
-    return LocalEnvelopeCipher.from_base64_key(
-        base64.urlsafe_b64encode(b"0" * 32).decode()
-    )
+
+    return LocalEnvelopeCipher.from_base64_key(base64.urlsafe_b64encode(b"0" * 32).decode())
 
 
 @pytest.fixture
@@ -186,12 +219,20 @@ def registry(engine: AsyncEngine) -> McpRegistry:
 @pytest.fixture
 def fake_executor() -> FakeMcpExecutor:
     executor = FakeMcpExecutor()
-    executor.set_result("echo.readonly", McpToolResult(
-        success=True, data={"echo": "read-only-response"},
-    ))
-    executor.set_result("db.write", McpToolResult(
-        success=True, data={"written": True},
-    ))
+    executor.set_result(
+        "echo.readonly",
+        McpToolResult(
+            success=True,
+            data={"echo": "read-only-response"},
+        ),
+    )
+    executor.set_result(
+        "db.write",
+        McpToolResult(
+            success=True,
+            data={"written": True},
+        ),
+    )
     return executor
 
 
@@ -203,30 +244,42 @@ def validator() -> McpValidator:
 @pytest.fixture
 def documents(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> DocumentRepository:
     return DocumentRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher,
+        session_factory=async_sessionmaker(engine, expire_on_commit=False),
+        cipher=cipher,
     )
 
 
 @pytest.fixture
 def broker(
-    engine: AsyncEngine, documents: DocumentRepository,
-    cipher: LocalEnvelopeCipher, verifier: GrantVerifier,
-    registry: McpRegistry, fake_executor: FakeMcpExecutor,
+    engine: AsyncEngine,
+    documents: DocumentRepository,
+    cipher: LocalEnvelopeCipher,
+    verifier: GrantVerifier,
+    registry: McpRegistry,
+    fake_executor: FakeMcpExecutor,
     validator: McpValidator,
 ) -> ToolBroker:
     return ToolBroker(
         session_factory=async_sessionmaker(engine, expire_on_commit=False),
-        documents=documents, cipher=cipher, grant_verifier=verifier,
-        mcp_registry=registry, mcp_executor=fake_executor, mcp_validator=validator,
+        documents=documents,
+        cipher=cipher,
+        grant_verifier=verifier,
+        mcp_registry=registry,
+        mcp_executor=fake_executor,
+        mcp_validator=validator,
     )
 
 
 # ---- Tests ----
 
+
 @pytest.mark.asyncio
 async def test_mcp_read_tool_executes_via_fake_executor(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
 ):
     """An enabled MCP read tool executes via the fake executor."""
     user_id = uuid.uuid4()
@@ -234,11 +287,18 @@ async def test_mcp_read_tool_executes_via_fake_executor(
         await _provision_user(session, user_id)
     await _seed_mcp_manifest(cipher, engine, user_id)
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, _MCP_READ_MANIFEST, inputs={"msg": "hello"},
+        engine,
+        cipher,
+        user_id,
+        _MCP_READ_MANIFEST,
+        inputs={"msg": "hello"},
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["mcp1"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["mcp1"],
+        ttl_seconds=300,
     )
     result = await broker.invoke(token, "mcp1", "echo.readonly", {"message": "hello"})
     assert result.success
@@ -247,8 +307,11 @@ async def test_mcp_read_tool_executes_via_fake_executor(
 
 @pytest.mark.asyncio
 async def test_disabled_mcp_tool_rejected(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
 ):
     """A tool that is not registered/enabled → MCP_TOOL_DISABLED."""
     user_id = uuid.uuid4()
@@ -261,16 +324,22 @@ async def test_disabled_mcp_tool_rejected(
         "schema_version": 1,
         "allowed_tools": ["mystery.tool"],
         "steps": [
-            {"id": "bad", "tool": "mystery.tool",
-             "input": {}},
+            {"id": "bad", "tool": "mystery.tool", "input": {}},
         ],
     }
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, manifest_with_mystery, inputs={},
+        engine,
+        cipher,
+        user_id,
+        manifest_with_mystery,
+        inputs={},
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["bad"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["bad"],
+        ttl_seconds=300,
     )
     result = await broker.invoke(token, "bad", "mystery.tool", {})
     assert not result.success
@@ -279,8 +348,11 @@ async def test_disabled_mcp_tool_rejected(
 
 @pytest.mark.asyncio
 async def test_mutable_mcp_tool_requires_approval(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
 ):
     """A mutable MCP tool step requires an approval (NEW #7).
 
@@ -292,12 +364,19 @@ async def test_mutable_mcp_tool_requires_approval(
     await _seed_mcp_manifest(cipher, engine, user_id)
     # Seed a run WITHOUT an approval for the mutable tool.
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, _MCP_WRITE_MANIFEST, inputs={"key": "k", "value": "v"},
+        engine,
+        cipher,
+        user_id,
+        _MCP_WRITE_MANIFEST,
+        inputs={"key": "k", "value": "v"},
         with_approval=False,
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["mcp2"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["mcp2"],
+        ttl_seconds=300,
     )
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(token, "mcp2", "db.write", {"key": "k", "value": "v"})
@@ -305,8 +384,11 @@ async def test_mutable_mcp_tool_requires_approval(
 
 @pytest.mark.asyncio
 async def test_mutable_mcp_tool_with_approval_succeeds(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
 ):
     """A mutable MCP tool WITH an approval executes successfully (NEW #7)."""
     user_id = uuid.uuid4()
@@ -314,12 +396,19 @@ async def test_mutable_mcp_tool_with_approval_succeeds(
         await _provision_user(session, user_id)
     await _seed_mcp_manifest(cipher, engine, user_id)
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, _MCP_WRITE_MANIFEST, inputs={"key": "k", "value": "v"},
+        engine,
+        cipher,
+        user_id,
+        _MCP_WRITE_MANIFEST,
+        inputs={"key": "k", "value": "v"},
         with_approval=True,
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["mcp2"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["mcp2"],
+        ttl_seconds=300,
     )
     result = await broker.invoke(token, "mcp2", "db.write", {"key": "k", "value": "v"})
     assert result.success
@@ -328,8 +417,12 @@ async def test_mutable_mcp_tool_with_approval_succeeds(
 
 @pytest.mark.asyncio
 async def test_output_schema_validation_failure_returns_typed_error(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry, fake_executor: FakeMcpExecutor,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
+    fake_executor: FakeMcpExecutor,
 ):
     """Output that does not match the registered schema → typed failure."""
     user_id = uuid.uuid4()
@@ -337,17 +430,28 @@ async def test_output_schema_validation_failure_returns_typed_error(
         await _provision_user(session, user_id)
     await _seed_mcp_manifest(cipher, engine, user_id)
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, _MCP_READ_MANIFEST, inputs={"msg": "hi"},
+        engine,
+        cipher,
+        user_id,
+        _MCP_READ_MANIFEST,
+        inputs={"msg": "hi"},
     )
     # Override the executor to return data that does NOT match the output schema.
     # The registered output_schema expects echo to be a string; returning an
     # integer for echo should fail JSON Schema validation.
-    fake_executor.set_result("echo.readonly", McpToolResult(
-        success=True, data={"echo": 42},
-    ))
+    fake_executor.set_result(
+        "echo.readonly",
+        McpToolResult(
+            success=True,
+            data={"echo": 42},
+        ),
+    )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["mcp1"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["mcp1"],
+        ttl_seconds=300,
     )
     result = await broker.invoke(token, "mcp1", "echo.readonly", {"message": "hi"})
     assert not result.success
@@ -357,8 +461,11 @@ async def test_output_schema_validation_failure_returns_typed_error(
 
 @pytest.mark.asyncio
 async def test_cross_user_mcp_server_denied(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
 ):
     """A user B cannot invoke user A's MCP tools."""
     user_a = uuid.uuid4()
@@ -370,11 +477,18 @@ async def test_cross_user_mcp_server_denied(
     await _seed_mcp_manifest(cipher, engine, user_a)
     # Seed a run owned by user B.
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_b, _MCP_READ_MANIFEST, inputs={"msg": "hi"},
+        engine,
+        cipher,
+        user_b,
+        _MCP_READ_MANIFEST,
+        inputs={"msg": "hi"},
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_b), plan_hash=plan_hash,
-        step_ids=["mcp1"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_b),
+        plan_hash=plan_hash,
+        step_ids=["mcp1"],
+        ttl_seconds=300,
     )
     result = await broker.invoke(token, "mcp1", "echo.readonly", {"message": "hi"})
     # User B has no registered MCP tool "echo.readonly" → disabled.
@@ -388,40 +502,54 @@ _MCP_NO_MUTABLE_FIELD_MANIFEST = {
     "schema_version": 1,
     "allowed_tools": ["power.format"],
     "steps": [
-        {"id": "pw1", "tool": "power.format",
-         "input": {"path": "{{path}}"}},
+        {"id": "pw1", "tool": "power.format", "input": {"path": "{{path}}"}},
     ],
 }
 
 
-async def _seed_power_tool(cipher: LocalEnvelopeCipher, engine: AsyncEngine,
-                           user_id: uuid.UUID) -> None:
+async def _seed_power_tool(cipher: LocalEnvelopeCipher, engine: AsyncEngine, user_id: uuid.UUID) -> None:
     """Register a tool WITHOUT an explicit mutable field (defaults to True)."""
     from app.models.execution import McpServer as McpServerRecord
     from app.models.execution import McpTool as McpToolRecord
 
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         sid = uuid.uuid4()
-        session.add(McpServerRecord(
-            id=sid, user_id=user_id, name="power-server",
-            image=f"oci://example/power@sha256:{PINNED_DIGEST}",
-            enabled=True, provenance="test", sbom="test",
-        ))
-        session.add(McpToolRecord(
-            id=uuid.uuid4(), user_id=user_id, server_id=sid,
-            tool_id="power.format", enabled=True, mutable=True,
-            # NOTE: this is the fail-closed default — the DB stores 'mutable'
-            # as True because the manifest didn't declare mutable: false.
-            input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
-            output_schema={"type": "object"},
-        ))
+        session.add(
+            McpServerRecord(
+                id=sid,
+                user_id=user_id,
+                name="power-server",
+                image=f"oci://example/power@sha256:{PINNED_DIGEST}",
+                enabled=True,
+                provenance="test",
+                sbom="test",
+            )
+        )
+        session.add(
+            McpToolRecord(
+                id=uuid.uuid4(),
+                user_id=user_id,
+                server_id=sid,
+                tool_id="power.format",
+                enabled=True,
+                mutable=True,
+                # NOTE: this is the fail-closed default — the DB stores 'mutable'
+                # as True because the manifest didn't declare mutable: false.
+                input_schema={"type": "object", "properties": {"path": {"type": "string"}}},
+                output_schema={"type": "object"},
+            )
+        )
         await session.commit()
 
 
 @pytest.mark.asyncio
 async def test_power_tool_without_approval_rejected(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry, fake_executor: FakeMcpExecutor,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
+    fake_executor: FakeMcpExecutor,
 ):
     """IMPORTANT #1: a tool registered WITHOUT ``mutable: false`` defaults to
     mutable=True → requires an approval. Without one, the broker rejects.
@@ -430,17 +558,28 @@ async def test_power_tool_without_approval_rejected(
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         await _provision_user(session, user_id)
     await _seed_power_tool(cipher, engine, user_id)
-    fake_executor.set_result("power.format", McpToolResult(
-        success=True, data={"formatted": True},
-    ))
+    fake_executor.set_result(
+        "power.format",
+        McpToolResult(
+            success=True,
+            data={"formatted": True},
+        ),
+    )
     # Seed a run WITHOUT approval.
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, _MCP_NO_MUTABLE_FIELD_MANIFEST,
-        inputs={"path": "/etc/hosts"}, with_approval=False,
+        engine,
+        cipher,
+        user_id,
+        _MCP_NO_MUTABLE_FIELD_MANIFEST,
+        inputs={"path": "/etc/hosts"},
+        with_approval=False,
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["pw1"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["pw1"],
+        ttl_seconds=300,
     )
     with pytest.raises(ApiError, match="SANDBOX_GRANT_INVALID"):
         await broker.invoke(token, "pw1", "power.format", {"path": "/etc/hosts"})
@@ -448,24 +587,39 @@ async def test_power_tool_without_approval_rejected(
 
 @pytest.mark.asyncio
 async def test_power_tool_with_approval_succeeds(
-    broker: ToolBroker, engine: AsyncEngine, cipher: LocalEnvelopeCipher,
-    signer: GrantSigner, registry: McpRegistry, fake_executor: FakeMcpExecutor,
+    broker: ToolBroker,
+    engine: AsyncEngine,
+    cipher: LocalEnvelopeCipher,
+    signer: GrantSigner,
+    registry: McpRegistry,
+    fake_executor: FakeMcpExecutor,
 ):
     """IMPORTANT #1: with an approval, a tool that defaulted to mutable succeeds."""
     user_id = uuid.uuid4()
     async with async_sessionmaker(engine, expire_on_commit=False)() as session:
         await _provision_user(session, user_id)
     await _seed_power_tool(cipher, engine, user_id)
-    fake_executor.set_result("power.format", McpToolResult(
-        success=True, data={"formatted": True},
-    ))
+    fake_executor.set_result(
+        "power.format",
+        McpToolResult(
+            success=True,
+            data={"formatted": True},
+        ),
+    )
     run_id, doc_id, ver_id, plan_hash, _ = await _seed_run_with_plan_hash(
-        engine, cipher, user_id, _MCP_NO_MUTABLE_FIELD_MANIFEST,
-        inputs={"path": "/tmp"}, with_approval=True,
+        engine,
+        cipher,
+        user_id,
+        _MCP_NO_MUTABLE_FIELD_MANIFEST,
+        inputs={"path": "/tmp"},
+        with_approval=True,
     )
     token = signer.sign(
-        run_id=run_id, user_id=str(user_id), plan_hash=plan_hash,
-        step_ids=["pw1"], ttl_seconds=300,
+        run_id=run_id,
+        user_id=str(user_id),
+        plan_hash=plan_hash,
+        step_ids=["pw1"],
+        ttl_seconds=300,
     )
     result = await broker.invoke(token, "pw1", "power.format", {"path": "/tmp"})
     assert result.success

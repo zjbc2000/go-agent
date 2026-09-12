@@ -36,9 +36,18 @@ TEST_INTERNAL_TOKEN = "test-internal-token"
 DATABASE_URL = os.getenv("TEST_DATABASE_URL", "postgresql+asyncpg://postgres:postgres@127.0.0.1:54322/postgres")
 
 _PLANNING_TABLES = (
-    "public.audit_logs, public.approvals, public.document_drafts, "
-    "public.document_versions, public.documents"
+    "public.audit_logs, public.approvals, public.document_drafts, public.document_versions, public.documents"
 )
+
+# The test suite TRUNCATEs planning tables before each test. That is safe ONLY against
+# an isolated test database. If TEST_DATABASE_URL is not set and the default points at
+# the dev database (`/postgres`), refuse to run — otherwise the suite silently wipes
+# the developer's real documents. Set TEST_DATABASE_URL to an isolated test DB.
+if os.getenv("TEST_DATABASE_URL") is None and DATABASE_URL.rstrip("/").endswith("/postgres"):
+    raise RuntimeError(
+        "Refusing to run tests against the dev database. Set TEST_DATABASE_URL to an "
+        "isolated test database (e.g. postgres_test)."
+    )
 
 
 def _context(user_id: uuid.UUID) -> RequestContext:
@@ -77,9 +86,7 @@ async def db_session(engine: AsyncEngine) -> AsyncIterator[AsyncSession]:
 
 @pytest.fixture
 def repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> DocumentRepository:
-    return DocumentRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
-    )
+    return DocumentRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher)
 
 
 @pytest.fixture
@@ -105,9 +112,7 @@ async def user_b(db_session: AsyncSession) -> RequestContext:
 
 @pytest.fixture
 def chat_repository(engine: AsyncEngine, cipher: LocalEnvelopeCipher) -> ChatRepository:
-    return ChatRepository(
-        session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher
-    )
+    return ChatRepository(session_factory=async_sessionmaker(engine, expire_on_commit=False), cipher=cipher)
 
 
 @pytest.fixture
@@ -131,6 +136,7 @@ async def pending_approval(service: PlanningService, user_context: RequestContex
 
 # --- API fixtures ------------------------------------------------------------
 
+
 def _fake_jwt_verifier(token: str) -> dict:
     """Verify a test token of the form ``Bearer <uuid>`` without any network call."""
     try:
@@ -147,8 +153,14 @@ def _fake_role_loader(user_id: uuid.UUID) -> UserRole:
 @pytest.fixture
 def app_settings() -> Settings:
     # Disable the outbox poller so entering the TestClient never starts the
-    # RabbitMQ background task during unrelated suites.
-    return Settings(internal_token=TEST_INTERNAL_TOKEN, outbox_poller_enabled=False)
+    # RabbitMQ background task during unrelated suites. Point the app at the SAME
+    # test database the repository fixtures use, so the API layer and the repo layer
+    # agree (otherwise API tests hit the dev DB).
+    return Settings(
+        internal_token=TEST_INTERNAL_TOKEN,
+        outbox_poller_enabled=False,
+        database_url=DATABASE_URL,
+    )
 
 
 @pytest.fixture

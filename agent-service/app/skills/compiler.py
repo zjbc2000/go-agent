@@ -40,9 +40,7 @@ def canonical_json(payload: dict[str, Any]) -> str:
     return json.dumps(payload, sort_keys=True, separators=(",", ":"))
 
 
-def compile_skill(
-    manifest: dict[str, Any], inputs: dict[str, Any], *, version_id: UUID
-) -> ExecutionPlan:
+def compile_skill(manifest: dict[str, Any], inputs: dict[str, Any], *, version_id: UUID) -> ExecutionPlan:
     """Compile a manifest (as a raw dict) into an immutable plan for ``version_id``."""
     parsed = _parse_manifest(manifest)
     steps = [_compile_step(step, inputs, parsed.allowed_tools) for step in parsed.steps]
@@ -69,9 +67,7 @@ def _parse_manifest(data: dict[str, Any]) -> SkillManifest:
 def _compile_step(step: SkillStep, inputs: dict[str, Any], allowed_tools: list[str]) -> CompiledStep:
     allowed = ALWAYS_ALLOWED_TOOLS.union(allowed_tools)
     if step.tool not in allowed:
-        raise ApiError(
-            "SKILL_INVALID", f"Tool {step.tool!r} is not allowed by this skill.", False
-        )
+        raise ApiError("SKILL_INVALID", f"Tool {step.tool!r} is not allowed by this skill.", False)
     substituted = _substitute(step.input, inputs)
     _validate_step_input(step.tool, substituted)
     return CompiledStep(id=step.id, tool=step.tool, input=substituted)

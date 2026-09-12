@@ -3,12 +3,18 @@
 // ============================================================
 
 import { createContext, useContext } from "react";
-import type { AuthRepository, ChatRepository, PlanningRepository } from "@/lib/domain/repositories";
+import type {
+  AuthRepository,
+  ChatRepository,
+  CompanyRepository,
+  PlanningRepository,
+} from "@/lib/domain/repositories";
 
 export interface RepositoryBundle {
   auth: AuthRepository;
   chat: ChatRepository;
   planning: PlanningRepository;
+  company: CompanyRepository;
 }
 
 export const RepositoryContext = createContext<RepositoryBundle | null>(null);

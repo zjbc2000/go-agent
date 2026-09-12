@@ -42,6 +42,11 @@ export async function POST(request: Request, { params }: { params: Promise<{ pat
   return proxy(path, request);
 }
 
+export async function PUT(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
+  const { path } = await params;
+  return proxy(path, request);
+}
+
 export async function DELETE(request: Request, { params }: { params: Promise<{ path: string[] }> }) {
   const { path } = await params;
   return proxy(path, request);

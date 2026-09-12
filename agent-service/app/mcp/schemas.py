@@ -48,14 +48,10 @@ class McpManifest(BaseModel):
     @classmethod
     def _image_must_be_digest_pinned(cls, v: str) -> str:
         if not v.startswith("oci://") or "@sha256:" not in v:
-            raise ValueError(
-                "MCP image must be pinned by digest: oci://<path>@sha256:<hex64>"
-            )
+            raise ValueError("MCP image must be pinned by digest: oci://<path>@sha256:<hex64>")
         _, digest_part = v.rsplit("@sha256:", 1)
         if len(digest_part) != 64 or not all(c in "0123456789abcdef" for c in digest_part):
-            raise ValueError(
-                "MCP image must be pinned by digest: oci://<path>@sha256:<hex64>"
-            )
+            raise ValueError("MCP image must be pinned by digest: oci://<path>@sha256:<hex64>")
         return v
 
     @field_validator("provenance", "sbom")

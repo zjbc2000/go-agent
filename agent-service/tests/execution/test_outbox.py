@@ -51,9 +51,7 @@ async def test_repeated_confirm_key_returns_same_run_without_second_event(
     first = await service.confirm_execution(user_context, approval.id, "confirm-same")
     second = await service.confirm_execution(user_context, approval.id, "confirm-same")
     assert second.id == first.id
-    events = await db_session.scalar(
-        text("select count(*) from outbox_events where event_type = 'sandbox.execute'")
-    )
+    events = await db_session.scalar(text("select count(*) from outbox_events where event_type = 'sandbox.execute'"))
     assert events == 1
 
 
@@ -77,9 +75,7 @@ async def test_confirm_expired_approval_is_rejected(service, user_context, appro
 
 
 async def test_confirm_another_users_approval_is_not_found(service, repository, user_a, user_b):
-    skill = await repository.create_active(
-        user_a, type="skill", title="a-skill", body=json.dumps(_WRITE_MANIFEST)
-    )
+    skill = await repository.create_active(user_a, type="skill", title="a-skill", body=json.dumps(_WRITE_MANIFEST))
     result = await service.request_execution(user_a, skill.id, {"title": "x"}, "req-key")
     assert result.approval is not None
     with pytest.raises(ApiError) as excinfo:
@@ -95,9 +91,7 @@ async def test_outbox_payload_contains_only_sandbox_run_id(service, user_context
     assert payload == {"sandbox_run_id": str(run.id)}
 
 
-async def test_confirm_run_resolves_approval_and_queues_run(
-    service, user_context, approval, db_session
-):
+async def test_confirm_run_resolves_approval_and_queues_run(service, user_context, approval, db_session):
     run = await service.confirm_execution(user_context, approval.id, "confirm-1")
     assert run.status == "queued"
     approval_status = await db_session.scalar(

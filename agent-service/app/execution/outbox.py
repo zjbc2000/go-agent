@@ -65,9 +65,7 @@ class OutboxRepository:
             )
             return row
 
-    async def list_pending(
-        self, *, max_attempts: int, now: datetime, limit: int = 100
-    ) -> list[dict[str, Any]]:
+    async def list_pending(self, *, max_attempts: int, now: datetime, limit: int = 100) -> list[dict[str, Any]]:
         """Return pending events eligible for publication, oldest first.
 
         An event is eligible when it has not exhausted its attempts and its
@@ -80,8 +78,7 @@ class OutboxRepository:
                     .where(
                         OutboxEventRecord.status == OUTBOX_PENDING,
                         OutboxEventRecord.attempts < max_attempts,
-                        (OutboxEventRecord.next_attempt_at.is_(None))
-                        | (OutboxEventRecord.next_attempt_at <= now),
+                        (OutboxEventRecord.next_attempt_at.is_(None)) | (OutboxEventRecord.next_attempt_at <= now),
                     )
                     .order_by(OutboxEventRecord.created_at.asc())
                     .limit(limit)
@@ -105,9 +102,7 @@ class OutboxRepository:
             row.status = OUTBOX_PUBLISHED
             row.published_at = published_at
 
-    async def record_failure(
-        self, event_id: uuid.UUID, *, attempts: int, next_attempt_at: datetime
-    ) -> None:
+    async def record_failure(self, event_id: uuid.UUID, *, attempts: int, next_attempt_at: datetime) -> None:
         """Record a failed publish and schedule the next bounded-backoff attempt."""
         async with service_session(self._session_factory) as session:
             row = await session.get(OutboxEventRecord, event_id)

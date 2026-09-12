@@ -9,6 +9,7 @@ RLS-gated.
 
 from __future__ import annotations
 
+import json
 import uuid
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -24,6 +25,7 @@ from app.models.chat import AgentRun
 from app.models.chat import Message as MessageRecord
 from app.models.chat import Session as SessionRecord
 from app.models.chat import StreamEvent as StreamEventRecord
+from app.models.planning import AuditLog as AuditLogRecord
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -95,6 +97,7 @@ class ChatSession:
     title: str
     created_at: datetime
     last_message_at: datetime
+    employee_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -128,12 +131,42 @@ class ChatRepository:
             yield session
 
     async def create_session(
-        self, context: RequestContext, title: str = "New chat"
+        self, context: RequestContext, title: str = "New chat", employee_id: uuid.UUID | None = None
     ) -> ChatSession:
-        """Create a chat session owned by the caller (RLS-scoped)."""
+        """Create a chat session owned by the caller (RLS-scoped).
+
+        ``employee_id`` binds the session to an employee so the graph injects that
+        employee's persona prompt instead of the planning assistant SOUL.
+        """
         async with self._transaction(context) as session:
-            record = SessionRecord(id=uuid.uuid4(), user_id=context.user_id, title=title)
+            record = SessionRecord(id=uuid.uuid4(), user_id=context.user_id, title=title, employee_id=employee_id)
             session.add(record)
+            await session.flush()
+            return ChatSession(
+                id=record.id,
+                user_id=record.user_id,
+                title=record.title,
+                employee_id=record.employee_id,
+                created_at=record.created_at,
+                last_message_at=record.updated_at,
+            )
+
+    async def get_session_employee_id(self, context: RequestContext, session_id: uuid.UUID) -> uuid.UUID | None:
+        """Return the session's bound employee_id, or None if it is a normal session (RLS-scoped)."""
+        async with self._transaction(context) as session:
+            record = await session.scalar(select(SessionRecord).where(SessionRecord.id == session_id))
+            return record.employee_id if record is not None else None
+
+    async def update_session_title(
+        self, context: RequestContext, session_id: uuid.UUID, title: str
+    ) -> ChatSession | None:
+        """Rename the caller's session (RLS-scoped); None if not owned/found."""
+        async with self._transaction(context) as session:
+            record = await session.scalar(select(SessionRecord).where(SessionRecord.id == session_id))
+            if record is None:
+                return None
+            record.title = title[:200]
+            record.updated_at = _utcnow()
             await session.flush()
             return ChatSession(
                 id=record.id,
@@ -201,12 +234,8 @@ class ChatRepository:
             )
 
     @staticmethod
-    async def _created_run_from_messages(
-        session: AsyncSession, run: AgentRun
-    ) -> CreatedRun:
-        messages = (
-            await session.scalars(select(MessageRecord).where(MessageRecord.run_id == run.id))
-        ).all()
+    async def _created_run_from_messages(session: AsyncSession, run: AgentRun) -> CreatedRun:
+        messages = (await session.scalars(select(MessageRecord).where(MessageRecord.run_id == run.id))).all()
         return CreatedRun.from_model(
             run,
             assistant_message_id=next(m.id for m in messages if m.role == "assistant"),
@@ -271,9 +300,7 @@ class ChatRepository:
     async def get_message(self, context: RequestContext, message_id: uuid.UUID) -> Message | None:
         """Return a message the caller owns, decrypted, or None (RLS-scoped)."""
         async with self._transaction(context) as session:
-            row = await session.scalar(
-                select(MessageRecord).where(MessageRecord.id == message_id)
-            )
+            row = await session.scalar(select(MessageRecord).where(MessageRecord.id == message_id))
             if row is None:
                 return None
             return Message(
@@ -327,9 +354,7 @@ class ChatRepository:
             if run is None:
                 return None
             assistant = await session.scalar(
-                select(MessageRecord).where(
-                    MessageRecord.run_id == run_id, MessageRecord.role == "assistant"
-                )
+                select(MessageRecord).where(MessageRecord.run_id == run_id, MessageRecord.role == "assistant")
             )
             if assistant is None:
                 raise ApiError("INTERNAL_ERROR", "Run has no assistant message.", False)
@@ -343,9 +368,7 @@ class ChatRepository:
                 updated_at=run.updated_at,
             )
 
-    async def list_events(
-        self, context: RequestContext, run_id: uuid.UUID, after: int
-    ) -> list[StreamEvent]:
+    async def list_events(self, context: RequestContext, run_id: uuid.UUID, after: int) -> list[StreamEvent]:
         """List the caller's stream events for a run with ``sequence > after`` (RLS-scoped)."""
         async with self._transaction(context) as session:
             rows = (
@@ -395,11 +418,14 @@ class ChatRepository:
         a second generation.
         """
         async with self._transaction(context) as session:
-            result = cast(CursorResult[Any], await session.execute(
-                update(AgentRun)
-                .where(AgentRun.id == run_id, AgentRun.status == "queued")
-                .values(status="streaming", updated_at=_utcnow())
-            ))
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    update(AgentRun)
+                    .where(AgentRun.id == run_id, AgentRun.status == "queued")
+                    .values(status="streaming", updated_at=_utcnow())
+                ),
+            )
             return result.rowcount == 1
 
     async def finalize_message(
@@ -422,14 +448,17 @@ class ChatRepository:
         never touched, so a reconnecting client can always resume a live stream.
         """
         async with self._service_session() as session:
-            result = cast(CursorResult[Any], await session.execute(
-                delete(StreamEventRecord).where(
-                    StreamEventRecord.created_at < older_than,
-                    StreamEventRecord.run_id.in_(
-                        select(AgentRun.id).where(AgentRun.status.in_(("completed", "failed")))
-                    ),
-                )
-            ))
+            result = cast(
+                CursorResult[Any],
+                await session.execute(
+                    delete(StreamEventRecord).where(
+                        StreamEventRecord.created_at < older_than,
+                        StreamEventRecord.run_id.in_(
+                            select(AgentRun.id).where(AgentRun.status.in_(("completed", "failed")))
+                        ),
+                    )
+                ),
+            )
             await session.flush()
             return result.rowcount if result.rowcount > 0 else 0
 
@@ -441,23 +470,24 @@ class ChatRepository:
         cascade is explicit: stream_events -> agent_runs -> messages -> session.
         """
         async with self._transaction(context) as session:
-            row = await session.scalar(
-                select(SessionRecord).where(SessionRecord.id == session_id)
-            )
+            row = await session.scalar(select(SessionRecord).where(SessionRecord.id == session_id))
             if row is None:
                 return False
             await session.execute(
                 delete(StreamEventRecord).where(
-                    StreamEventRecord.run_id.in_(
-                        select(AgentRun.id).where(AgentRun.session_id == session_id)
-                    )
+                    StreamEventRecord.run_id.in_(select(AgentRun.id).where(AgentRun.session_id == session_id))
                 )
             )
-            await session.execute(
-                delete(AgentRun).where(AgentRun.session_id == session_id)
-            )
-            await session.execute(
-                delete(MessageRecord).where(MessageRecord.session_id == session_id)
+            await session.execute(delete(AgentRun).where(AgentRun.session_id == session_id))
+            await session.execute(delete(MessageRecord).where(MessageRecord.session_id == session_id))
+            session.add(
+                AuditLogRecord(
+                    id=uuid.uuid4(),
+                    user_id=context.user_id,
+                    document_id=None,
+                    action="session.deleted",
+                    detail_ciphertext=self._cipher.encrypt(json.dumps({"title": row.title})),
+                )
             )
             await session.delete(row)
             await session.flush()

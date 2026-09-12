@@ -28,6 +28,12 @@ describe("MockChatRepository", () => {
     expect(session.id).toMatch(/^sess_/);
   });
 
+  it("creates a session with an employee title", async () => {
+    const session = await repo.createSession("[秘书]苏曼", "emp-1");
+    expect(session.title).toBe("[秘书]苏曼");
+    expect(session.id).toMatch(/^sess_/);
+  });
+
   it("createRun returns a run with a streaming event iterable", async () => {
     const run = await repo.createRun("sess_1", "测试消息", "req_test");
     expect(run.runId).toMatch(/^run_/);

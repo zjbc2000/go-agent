@@ -178,10 +178,10 @@ export function createMockChatRepository(): ChatRepository {
       return { runId, status: "completed", content: "" };
     },
 
-    async createSession(): Promise<Session> {
+    async createSession(title?: string): Promise<Session> {
       const session: Session = {
         id: `sess_${generateId("s")}`,
-        title: "新对话",
+        title: title ?? "新对话",
         lastMessageAt: new Date().toISOString(),
         createdAt: new Date().toISOString(),
       };
@@ -193,6 +193,10 @@ export function createMockChatRepository(): ChatRepository {
     async deleteSession(sessionId: string): Promise<void> {
       sessions = sessions.filter((s) => s.id !== sessionId);
       delete messages[sessionId];
+    },
+
+    async renameSession(sessionId: string, title: string): Promise<void> {
+      sessions = sessions.map((s) => (s.id === sessionId ? { ...s, title } : s));
     },
   };
 }

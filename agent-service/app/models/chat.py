@@ -20,13 +20,19 @@ def _utcnow() -> datetime:
 
 
 class Session(Base):
-    """A chat session owned by one user."""
+    """A chat session owned by one user.
+
+    ``employee_id`` marks an employee-bound session: the assistant graph injects ONLY
+    that employee's persona prompt (never the planning assistant SOUL) when generating
+    inside it. NULL means a normal 苟蛋 session.
+    """
 
     __tablename__ = "sessions"
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
     user_id: Mapped[uuid.UUID] = mapped_column(Uuid, nullable=False, index=True)
     title: Mapped[str] = mapped_column(String(200), nullable=False, default="New chat")
+    employee_id: Mapped[uuid.UUID | None] = mapped_column(Uuid, nullable=True, index=True)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, default=_utcnow)
 
@@ -58,9 +64,7 @@ class Message(Base):
     __tablename__ = "messages"
     __table_args__ = (
         CheckConstraint("role in ('user', 'assistant', 'system')", name="messages_role_check"),
-        CheckConstraint(
-            "status in ('queued', 'streaming', 'completed', 'failed')", name="messages_status_check"
-        ),
+        CheckConstraint("status in ('queued', 'streaming', 'completed', 'failed')", name="messages_status_check"),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)

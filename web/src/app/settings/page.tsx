@@ -42,9 +42,9 @@ export default function SettingsPage() {
                 <User className="h-5 w-5 text-muted-foreground" />
               </div>
               <div>
-                <p className="text-sm font-medium">{user?.name ?? "苟蛋用户"}</p>
+                <p className="text-sm font-medium">{user?.name ?? "未登录"}</p>
                 <p className="text-xs text-muted-foreground">
-                  {user?.email ?? "user@goudan.app"}
+                  {user?.email ?? "未登录"}
                 </p>
               </div>
             </div>

@@ -178,10 +178,42 @@ describe("RealPlanningRepository", () => {
     );
   });
 
-  it("updateDocument is not implemented (edits happen via edit-confirm approvals)", async () => {
-    await expect(
-      createRealPlanningRepository().updateDocument("doc-1", { title: "T" }),
-    ).rejects.toThrow(/edit-confirm approvals/);
+  it("updateDocument PUTs the edit and maps the returned document", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      jsonResponse({
+        id: "doc-1",
+        type: "task",
+        title: "T2",
+        body: "B2",
+        version: 2,
+        createdAt: "2026-08-06T00:00:00Z",
+        updatedAt: "2026-08-06T00:00:00Z",
+      }),
+    );
+    vi.stubGlobal("fetch", fetchMock);
+
+    const result = await createRealPlanningRepository().updateDocument("doc-1", {
+      title: "T2",
+      content: "B2",
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/internal/v1/documents/doc-1",
+      expect.objectContaining({ method: "PUT", body: JSON.stringify({ title: "T2", body: "B2" }) }),
+    );
+    expect(result).toMatchObject({ id: "doc-1", title: "T2", content: "B2", version: 2 });
+  });
+
+  it("deleteVersion DELETEs the version route", async () => {
+    const fetchMock = vi.fn().mockResolvedValue(jsonResponse({ ok: true }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    await createRealPlanningRepository().deleteVersion("doc-1", "ver-3");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "/api/v1/internal/v1/documents/doc-1/versions/ver-3",
+      expect.objectContaining({ method: "DELETE" }),
+    );
   });
 
   it("requestExecution POSTs the executions route and maps the approval envelope", async () => {

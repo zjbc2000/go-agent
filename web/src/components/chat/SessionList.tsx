@@ -6,7 +6,15 @@ import { useChatStore } from "@/lib/stores/chat-store";
 import { useRepositories } from "@/lib/providers/repository-context";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { Badge } from "@/components/ui/badge";
 import { MessageSquare, Trash2 } from "lucide-react";
+
+/** Split a title like "[秘书]苏曼" into the badge position and the plain name. */
+function splitEmployeeTitle(title: string): { position?: string; name: string } {
+  const match = /^\[([^\]]+)\](.*)$/.exec(title);
+  if (!match) return { name: title };
+  return { position: match[1], name: match[2] || title };
+}
 
 export function SessionList() {
   const pathname = usePathname();
@@ -49,6 +57,7 @@ export function SessionList() {
       {sessions.map((s) => {
         const isActive =
           pathname.includes(s.id) || (activeSessionId === s.id && pathname === "/chat");
+        const { position, name } = splitEmployeeTitle(s.title);
         return (
           <div
             key={s.id}
@@ -65,7 +74,12 @@ export function SessionList() {
               className="flex items-center gap-2 min-w-0 flex-1"
             >
               <MessageSquare className="h-3.5 w-3.5 shrink-0" />
-              <span className="truncate">{s.title}</span>
+              {position && (
+                <Badge variant="secondary" className="text-[10px] px-1.5 py-0 shrink-0">
+                  {position}
+                </Badge>
+              )}
+              <span className="truncate">{name}</span>
             </Link>
             <button
               type="button"

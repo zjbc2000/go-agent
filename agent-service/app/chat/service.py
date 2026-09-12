@@ -41,6 +41,7 @@ class ChatService:
         self._retention = retention
         self._graph = graph
         self._draft_writer: Any = None
+        self._employee_writer: Any = None
         # Per-run in-process generation locks. Only one generator runs per run at a
         # time, so overlapping same-key requests can never double-generate; a reconnect
         # acquires the lock after the interrupted generator was cancelled and resumes.
@@ -49,6 +50,10 @@ class ChatService:
     def set_draft_writer(self, writer: Any) -> None:
         """Bind the planning service's ``create_document_draft`` for graph draft persistence."""
         self._draft_writer = writer
+
+    def set_employee_writer(self, writer: Any) -> None:
+        """Bind the employee service's ``create_employee_action_draft`` for graph HITL persistence."""
+        self._employee_writer = writer
 
     def _lock_for(self, run_id: UUID) -> asyncio.Lock:
         lock = self._generation_locks.get(run_id)
@@ -70,9 +75,7 @@ class ChatService:
         if await self._repo.get_run(context, run_id) is None:
             raise ApiError("NOT_FOUND", "Run not found.", False)
 
-    async def stream_run(
-        self, context: RequestContext, run_id: UUID, after: int
-    ) -> AsyncIterator[StreamEvent]:
+    async def stream_run(self, context: RequestContext, run_id: UUID, after: int) -> AsyncIterator[StreamEvent]:
         """Yield a run's stream: replay missed events, then follow live generation.
 
         Generation is guarded by a ``queued -> streaming`` DB claim plus an in-process
@@ -118,9 +121,7 @@ class ChatService:
             async for event in self._generate(context, run_id, persisted_deltas):
                 yield event
 
-    async def replay(
-        self, context: RequestContext, run_id: UUID, after: int
-    ) -> AsyncIterator[StreamEvent]:
+    async def replay(self, context: RequestContext, run_id: UUID, after: int) -> AsyncIterator[StreamEvent]:
         """Replay only the persisted events after ``after`` (no live generation)."""
         run = await self._repo.get_run(context, run_id)
         if run is None:
@@ -128,8 +129,10 @@ class ChatService:
         for event in await self._repo.list_events(context, run_id, after):
             yield event
 
-    async def create_session(self, context: RequestContext, title: str = "New chat") -> ChatSession:
-        return await self._repo.create_session(context, title)
+    async def create_session(
+        self, context: RequestContext, title: str = "New chat", employee_id: UUID | None = None
+    ) -> ChatSession:
+        return await self._repo.create_session(context, title, employee_id)
 
     async def list_sessions(self, context: RequestContext) -> list[ChatSession]:
         return await self._repo.list_sessions(context)
@@ -139,6 +142,21 @@ class ChatService:
         if not await self._repo.delete_session(context, session_id):
             raise ApiError("NOT_FOUND", "Session not found.", False)
 
+    async def rename_session(self, context: RequestContext, session_id: UUID, title: str) -> None:
+        """Rename the caller's session; 404 if not owned."""
+        if await self._repo.update_session_title(context, session_id, title) is None:
+            raise ApiError("NOT_FOUND", "Session not found.", False)
+
+    async def rename_session_for_run(self, context: RequestContext, run_id: UUID, title: str) -> None:
+        """Rename the session that owns ``run_id`` (used after an approval confirms).
+
+        Best-effort: if the session row is missing (tests seed runs without a session),
+        the rename is skipped rather than failing the approval follow-on.
+        """
+        run = await self._repo.get_run(context, run_id)
+        if run is not None:
+            await self._repo.update_session_title(context, run.session_id, title)
+
     async def list_messages(self, context: RequestContext, session_id: UUID) -> list[Message]:
         return await self._repo.list_messages(context, session_id)
 
@@ -147,9 +165,7 @@ class ChatService:
         before = datetime.now(UTC) - self._retention
         return await self._repo.purge_expired_events(before)
 
-    async def complete_run_with_message(
-        self, context: RequestContext, run_id: UUID, content: str | None
-    ) -> None:
+    async def complete_run_with_message(self, context: RequestContext, run_id: UUID, content: str | None) -> None:
         """Finalize a run's assistant message and mark it completed.
 
         No-op when the run is already terminal. Used by the planning service after a
@@ -166,13 +182,9 @@ class ChatService:
         if message is None or message.status != "completed":
             await self._repo.finalize_message(context, run.assistant_message_id, content or "")
         await self._repo.update_run_status(context, run_id, "completed")
-        await self._repo.append_event(
-            run_id, "run.completed", json.dumps({"messageId": str(run.assistant_message_id)})
-        )
+        await self._repo.append_event(run_id, "run.completed", json.dumps({"messageId": str(run.assistant_message_id)}))
 
-    async def _generate(
-        self, context: RequestContext, run_id: UUID, skip: int
-    ) -> AsyncIterator[StreamEvent]:
+    async def _generate(self, context: RequestContext, run_id: UUID, skip: int) -> AsyncIterator[StreamEvent]:
         run = await self._repo.get_run(context, run_id)
         if run is None:
             raise ApiError("NOT_FOUND", "Run not found.", False)
@@ -183,6 +195,9 @@ class ChatService:
             if m.status == "completed"
         ]
         token_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        # An employee-bound session injects only that employee's persona prompt, so the
+        # graph must know whether this run's session is bound to an employee.
+        session_employee_id = await self._repo.get_session_employee_id(context, run.session_id)
 
         async def _run_graph() -> dict:
             """Run the assistant graph; always unblock the drain loop when it ends."""
@@ -194,7 +209,9 @@ class ChatService:
                             "context": context,
                             "queue": token_queue,
                             "run_id": run_id,
+                            "session_employee_id": session_employee_id,
                             "draft_writer": self._draft_writer,
+                            "employee_writer": self._employee_writer,
                         }
                     },
                 )
@@ -251,20 +268,44 @@ class ChatService:
                 )
                 yield draft_event
                 return
+            employee_approval = state.get("employee_approval")
+            if employee_approval is not None:
+                # An employee action ends the stream here: no run.completed yet. The
+                # assistant message keeps the streamed explanation; the approval card
+                # shows the proposed action. A later decision completes the run via
+                # complete_run_with_message.
+                await self._repo.finalize_message(context, message_id, content)
+                await self._repo.update_run_status(context, run_id, "waiting_approval")
+                employee_event = await self._repo.append_event(
+                    run_id,
+                    "employee.action",
+                    json.dumps(
+                        {
+                            "approvalId": employee_approval["approval_id"],
+                            "sessionId": str(run.session_id),
+                            "messageId": str(message_id),
+                            "action": employee_approval["action"],
+                            "employeeId": employee_approval["employee_id"],
+                            "name": employee_approval["name"],
+                            "position": employee_approval["position"],
+                            "status": employee_approval["status"],
+                            "positionToSet": employee_approval["position_to_set"],
+                            "createdAt": datetime.now(UTC).isoformat(),
+                        }
+                    ),
+                )
+                yield employee_event
+                return
             await self._repo.finalize_message(context, message_id, content)
             await self._repo.update_run_status(context, run_id, "completed")
-            done = await self._repo.append_event(
-                run_id, "run.completed", json.dumps({"messageId": str(message_id)})
-            )
+            done = await self._repo.append_event(run_id, "run.completed", json.dumps({"messageId": str(message_id)}))
             yield done
         except ApiError as exc:
             async for event in self._fail(context, run_id, message_id, exc.code, exc.message):
                 yield event
         except Exception as exc:  # noqa: BLE001 - surfaced to the client as a run.failed event
             logger.exception("run %s generation failed", run_id)
-            async for event in self._fail(
-                context, run_id, message_id, "STREAM_INTERRUPTED", str(exc)
-            ):
+            async for event in self._fail(context, run_id, message_id, "STREAM_INTERRUPTED", str(exc)):
                 yield event
 
     async def _collect_text(self, context: RequestContext, run_id: UUID) -> str:

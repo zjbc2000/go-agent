@@ -39,7 +39,9 @@ class McpExecutor(Protocol):
     """
 
     async def execute(
-        self, tool_id: str, input: dict[str, Any],
+        self,
+        tool_id: str,
+        input: dict[str, Any],
         registration: dict[str, Any],
     ) -> ToolResult: ...
 
@@ -55,7 +57,9 @@ class FakeMcpExecutor:
         self._results[tool_id] = result
 
     async def execute(
-        self, tool_id: str, input: dict[str, Any],
+        self,
+        tool_id: str,
+        input: dict[str, Any],
         registration: dict[str, Any],
     ) -> ToolResult:
         """Return the pre-registered result, or a fallback success."""

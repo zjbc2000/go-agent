@@ -33,9 +33,7 @@ def build_sandbox_execute_message(sandbox_run_id: str) -> TaskMessage:
     """Build the Celery v2 message that runs ``execute_sandbox_run(run_id)``."""
     task_id = str(uuid.uuid4())
     args = [sandbox_run_id]
-    body = json.dumps(
-        (args, {}, {"callbacks": None, "errbacks": None, "chain": None, "chord": None})
-    ).encode("utf-8")
+    body = json.dumps((args, {}, {"callbacks": None, "errbacks": None, "chain": None, "chord": None})).encode("utf-8")
     headers: dict[str, Any] = {
         "lang": "py",
         "task": "sandbox.execute",

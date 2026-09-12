@@ -91,8 +91,9 @@ async def create_session(
     context: RequestContext = Depends(get_request_context),
     service: ChatService = Depends(get_chat_service),
 ) -> dict:
-    """Create a chat session owned by the caller. Optional ``title`` in the body."""
+    """Create a chat session owned by the caller. Optional ``title`` and ``employee_id``."""
     title = "New chat"
+    employee_id = None
     raw = await request.body()
     if raw:
         try:
@@ -105,7 +106,15 @@ async def create_session(
             if not isinstance(body["title"], str) or not body["title"].strip():
                 raise ApiError("VALIDATION_FAILED", "title must be a non-empty string.", False)
             title = body["title"].strip()
-    session = await service.create_session(context, title)
+        if body.get("employee_id") is not None:
+            raw_employee = body["employee_id"]
+            if not isinstance(raw_employee, str):
+                raise ApiError("VALIDATION_FAILED", "employee_id must be a UUID string.", False)
+            try:
+                employee_id = UUID(raw_employee)
+            except ValueError:
+                raise ApiError("VALIDATION_FAILED", "employee_id must be a UUID string.", False) from None
+    session = await service.create_session(context, title, employee_id)
     return {
         "id": str(session.id),
         "title": session.title,
@@ -113,6 +122,26 @@ async def create_session(
         "lastMessageAt": session.last_message_at.isoformat(),
         "userId": str(session.user_id),
     }
+
+
+@router.patch("/internal/v1/sessions/{session_id}")
+async def rename_session(
+    session_id: UUID,
+    request: Request,
+    _: None = Depends(require_internal_token),
+    context: RequestContext = Depends(get_request_context),
+    service: ChatService = Depends(get_chat_service),
+) -> dict:
+    """Rename the caller's session title."""
+    try:
+        body = await request.json()
+    except ValueError:
+        raise ApiError("VALIDATION_FAILED", "Invalid JSON body.", False) from None
+    title = body.get("title") if isinstance(body, dict) else None
+    if not isinstance(title, str) or not title.strip():
+        raise ApiError("VALIDATION_FAILED", "title is required.", False)
+    await service.rename_session(context, session_id, title.strip())
+    return {"ok": True}
 
 
 @router.get("/internal/v1/sessions")

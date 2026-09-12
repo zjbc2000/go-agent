@@ -50,3 +50,28 @@ async def test_stream_event_payload_never_contains_plaintext(db_session, chat_re
     await chat_repository.append_event(run.run_id, "message.delta", "sensitive-delta")
     raw = await db_session.scalar(text("select payload_ciphertext from stream_events limit 1"))
     assert "sensitive-delta" not in raw
+
+
+async def test_create_employee_session_binds_employee(chat_repository, cipher, user_context, db_session):
+    # employees.user_id references auth.users(id); the chat conftest's synthetic
+    # user needs a matching row before any employee insert.
+    await db_session.execute(
+        text("insert into auth.users (id) values (:id) on conflict (id) do nothing"),
+        {"id": user_context.user_id},
+    )
+    await db_session.commit()
+
+    from app.repositories.employees import EmployeeRepository
+
+    employee_repo = EmployeeRepository(session_factory=chat_repository._session_factory, cipher=cipher)
+    employee = await employee_repo.create(user_context, "苏曼", "秘书", "负责安排日程与会议纪要")
+    session = await chat_repository.create_session(user_context, "[秘书]苏曼", employee.id)
+    assert session.employee_id == employee.id
+
+    bound = await chat_repository.get_session_employee_id(user_context, session.id)
+    assert bound == employee.id
+
+    # A normal session has no employee binding.
+    normal = await chat_repository.create_session(user_context, "普通对话")
+    assert normal.employee_id is None
+    assert await chat_repository.get_session_employee_id(user_context, normal.id) is None
